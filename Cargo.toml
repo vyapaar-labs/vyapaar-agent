@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/vyapaar-agent",
+  "crates/vyapaar-agent-core",
+  "crates/vyapaar-agent-llm",
+  "crates/vyapaar-agent-prompt",
+  "crates/vyapaar-agent-replay",
+  "crates/vyapaar-agent-trader-loop",
+  "crates/vyapaar-agent-research",
+  "crates/vyapaar-agent-analytics",
+  "crates/vyapaar-agent-genetic",
+  "crates/vyapaar-agent-mcp",
+  "crates/vyapaar-agent-tools",
+  "crates/vyapaar-agent-plugins",
+  "crates/vyapaar-agent-report",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "AGPL-3.0"
+repository = "https://github.com/vyapaar-labs/vyapaar-agent"
+
+[workspace.dependencies]
+vyapaar-core = { path = "../vyapaar-core" }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tracing = "0.1"
+async-trait = "0.1"
