@@ -24,10 +24,74 @@ license = "AGPL-3.0"
 repository = "https://github.com/vyapaar-labs/vyapaar-agent"
 
 [workspace.dependencies]
+# Internal agent crates
+vyapaar-agent = { path = "crates/vyapaar-agent" }
+vyapaar-agent-core = { path = "crates/vyapaar-agent-core" }
+vyapaar-agent-llm = { path = "crates/vyapaar-agent-llm" }
+vyapaar-agent-prompt = { path = "crates/vyapaar-agent-prompt" }
+vyapaar-agent-replay = { path = "crates/vyapaar-agent-replay" }
+vyapaar-agent-trader-loop = { path = "crates/vyapaar-agent-trader-loop" }
+vyapaar-agent-research = { path = "crates/vyapaar-agent-research" }
+vyapaar-agent-analytics = { path = "crates/vyapaar-agent-analytics" }
+vyapaar-agent-genetic = { path = "crates/vyapaar-agent-genetic" }
+vyapaar-agent-mcp = { path = "crates/vyapaar-agent-mcp" }
+vyapaar-agent-tools = { path = "crates/vyapaar-agent-tools" }
+vyapaar-agent-plugins = { path = "crates/vyapaar-agent-plugins" }
+vyapaar-agent-report = { path = "crates/vyapaar-agent-report" }
 vyapaar-core = { path = "../vyapaar-core" }
+vyapaar-risk = { path = "../vyapaar-risk" }
+vyapaar-ledger = { path = "../vyapaar-ledger" }
+vyapaar-ledger-oms = { path = "../vyapaar-ledger/crates/vyapaar-ledger-oms" }
+vyapaar-ledger-portfolio = { path = "../vyapaar-ledger/crates/vyapaar-ledger-portfolio" }
+vyapaar-ledger-journal = { path = "../vyapaar-ledger/crates/vyapaar-ledger-journal" }
+vyapaar-market-core = { path = "../vyapaar-market/crates/vyapaar-market-core" }
+vyapaar-market-finance = { path = "../vyapaar-market/crates/vyapaar-market-finance" }
+vyapaar-market-feed = { path = "../vyapaar-market/crates/vyapaar-market-feed" }
+vyapaar-market-store = { path = "../vyapaar-market/crates/vyapaar-market-store" }
+vyapaar-market-normalizer = { path = "../vyapaar-market/crates/vyapaar-market-normalizer" }
+vyapaar-market-indicators = { path = "../vyapaar-market/crates/vyapaar-market-indicators" }
+vyapaar-market-signals = { path = "../vyapaar-market/crates/vyapaar-market-signals" }
+vyapaar-market-loaders = { path = "../vyapaar-market/crates/vyapaar-market-loaders" }
+vyapaar-market-zerodha = { path = "../vyapaar-market/crates/vyapaar-market-zerodha" }
+vyapaar-market-upstox = { path = "../vyapaar-market/crates/vyapaar-market-upstox" }
+vyapaar-market-fyers = { path = "../vyapaar-market/crates/vyapaar-market-fyers" }
+vyapaar-market-angelone = { path = "../vyapaar-market/crates/vyapaar-market-angelone" }
+vyapaar-exec-core = { path = "../vyapaar-exec/crates/vyapaar-exec-core" }
+vyapaar-exec-auth = { path = "../vyapaar-exec/crates/vyapaar-exec-auth" }
+vyapaar-exec-router = { path = "../vyapaar-exec/crates/vyapaar-exec-router" }
+vyapaar-exec-slicer = { path = "../vyapaar-exec/crates/vyapaar-exec-slicer" }
+vyapaar-exec-audit = { path = "../vyapaar-exec/crates/vyapaar-exec-audit" }
+vyapaar-exec-zerodha = { path = "../vyapaar-exec/crates/vyapaar-exec-zerodha" }
+vyapaar-exec-upstox = { path = "../vyapaar-exec/crates/vyapaar-exec-upstox" }
+vyapaar-exec-angelone = { path = "../vyapaar-exec/crates/vyapaar-exec-angelone" }
+vyapaar-runtime-strategy = { path = "../vyapaar-runtime/crates/vyapaar-runtime-strategy" }
+vyapaar-runtime-backtest = { path = "../vyapaar-runtime/crates/vyapaar-runtime-backtest" }
+vyapaar-runtime-config = { path = "../vyapaar-runtime/crates/vyapaar-runtime-config" }
+vyapaar-runtime-testing = { path = "../vyapaar-runtime/crates/vyapaar-runtime-testing" }
+vyapaar-runtime-persistence = { path = "../vyapaar-runtime/crates/vyapaar-runtime-persistence" }
+vyapaar-runtime-enhancer = { path = "../vyapaar-runtime/crates/vyapaar-runtime-enhancer" }
+vyapaar-runtime-actors = { path = "../vyapaar-runtime/crates/vyapaar-runtime-actors" }
+vyapaar-runtime-jobs = { path = "../vyapaar-runtime/crates/vyapaar-runtime-jobs" }
+vyapaar-runtime-api = { path = "../vyapaar-runtime/crates/vyapaar-runtime-api" }
+vyapaar-runtime-api-rest = { path = "../vyapaar-runtime/crates/vyapaar-runtime-api-rest" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+rust_decimal = "1"
+rust_decimal_macros = "1"
+chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1"
+sha2 = "0.10"
+schemars = { version = "0.8", features = ["derive"] }
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 async-trait = "0.1"
+futures = "0.3"
+uuid = { version = "1", features = ["v4", "serde"] }
+sqlx = { version = "0.8", features = ["time", "sqlite", "chrono", "uuid", "macros", "migrate"] }
+anyhow = "1"
+bytes = "1"
+rand = "0.8"
+axum = "0.7"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+proptest = "1"

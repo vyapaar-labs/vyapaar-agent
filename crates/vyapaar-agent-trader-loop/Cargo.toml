@@ -5,6 +5,14 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+tokio.workspace = true
+tracing.workspace = true
+chrono.workspace = true
 vyapaar-core = { workspace = true }
-serde = { workspace = true }
-thiserror = { workspace = true }
+vyapaar-risk = { workspace = true }
+vyapaar-agent-llm = { path = "../vyapaar-agent-llm" }
+
+[dev-dependencies]
+async-trait.workspace = true
+rust_decimal.workspace = true
+rust_decimal_macros.workspace = true

@@ -3,8 +3,21 @@ name = "vyapaar-agent-genetic"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "StockSharp Odysseus Port: types and interfaces for genetic strategy synthesis"
 
 [dependencies]
-vyapaar-core = { workspace = true }
-serde = { workspace = true }
-thiserror = { workspace = true }
+vyapaar-core.workspace = true
+vyapaar-agent-core = { path = "../vyapaar-agent-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+chrono = { version = "0.4", features = ["serde"] }
+rust_decimal = { version = "1" }
+rust_decimal_macros = { version = "1" }
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+rand = "0.8"
+
+[dev-dependencies]
+rand.workspace = true
+rust_decimal_macros.workspace = true
+vyapaar-agent-core.workspace = true

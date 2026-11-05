@@ -3,8 +3,26 @@ name = "vyapaar-agent-research"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Autonomous quantitative research loop: hypothesis generation, backtest pipeline, statistical verification, and strategy enhancement"
+
+[features]
+default = []
+llm = ["dep:vyapaar-agent-llm"]
 
 [dependencies]
-vyapaar-core = { workspace = true }
-serde = { workspace = true }
-thiserror = { workspace = true }
+vyapaar-core.workspace = true
+vyapaar-agent-core = { path = "../vyapaar-agent-core" }
+vyapaar-agent-analytics = { path = "../vyapaar-agent-analytics" }
+vyapaar-agent-llm = { path = "../vyapaar-agent-llm", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+chrono = { version = "0.4", features = ["serde"] }
+rust_decimal = { version = "1" }
+rust_decimal_macros = { version = "1" }
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+futures = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util"] }
+anyhow = "1"
+thiserror = { version = "1" }
+tracing = { version = "0.1" }

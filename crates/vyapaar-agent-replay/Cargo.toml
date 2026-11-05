@@ -3,8 +3,29 @@ name = "vyapaar-agent-replay"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Cryptographic prompt and decision replay harness with SQLite WAL / JSONL caching for vyapaar-agent"
 
 [dependencies]
-vyapaar-core = { workspace = true }
-serde = { workspace = true }
-thiserror = { workspace = true }
+vyapaar-core.workspace = true
+vyapaar-risk.workspace = true
+vyapaar-agent-core = { path = "../vyapaar-agent-core" }
+serde.workspace = true
+serde_json.workspace = true
+rust_decimal.workspace = true
+rust_decimal_macros.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+sha2.workspace = true
+uuid.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+schemars.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tokio.workspace = true
+# The workspace sqlx dep does not enable a runtime; the SQLite WAL cache tests
+# need the tokio runtime, so enable it for test builds via feature unification.
+sqlx = { workspace = true, features = ["runtime-tokio"] }

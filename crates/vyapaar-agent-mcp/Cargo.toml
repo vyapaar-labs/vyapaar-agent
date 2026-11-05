@@ -5,6 +5,29 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-vyapaar-core = { workspace = true }
-serde = { workspace = true }
-thiserror = { workspace = true }
+tokio.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+sha2 = "0.10"
+chrono.workspace = true
+rust_decimal.workspace = true
+rust_decimal_macros.workspace = true
+axum.workspace = true
+tracing.workspace = true
+vyapaar-core.workspace = true
+vyapaar-risk.workspace = true
+vyapaar-agent-core = { path = "../vyapaar-agent-core" }
+vyapaar-agent-analytics = { path = "../vyapaar-agent-analytics" }
+vyapaar-agent-llm = { path = "../vyapaar-agent-llm" }
+uuid.workspace = true
+bytes = "1.4"
+rand = "0.8"
+
+[dev-dependencies]
+reqwest.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+axum.workspace = true

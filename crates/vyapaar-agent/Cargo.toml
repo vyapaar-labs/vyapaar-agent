@@ -3,8 +3,21 @@ name = "vyapaar-agent"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Closed LLM decision parser, validation harness, deterministic prompt audit logger, and replay engine"
 
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+rust_decimal.workspace = true
+rust_decimal_macros.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+tracing.workspace = true
+schemars.workspace = true
 vyapaar-core = { workspace = true }
-serde = { workspace = true }
-thiserror = { workspace = true }
+vyapaar-risk = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
