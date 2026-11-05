@@ -11,6 +11,7 @@
 //! - Deterministic [`PromptReplayer`] with SQLite WAL and JSONL prompt caches keyed by `prompt_sha256`.
 //! - Interception of LLM queries during offline backtesting: zero latency and zero API cost.
 //! - Research-live parity verification.
+//! - Canonical request hashing helper for conversational assistant audit provenance.
 
 pub mod audit;
 pub mod cache;
@@ -18,7 +19,8 @@ pub mod error;
 pub mod replayer;
 
 pub use audit::{
-    AuditChainLedger, ChainedLlmAuditRecord, LlmAuditRecord, compute_record_hash, verify_hash_chain,
+    AuditChainLedger, ChainedLlmAuditRecord, LlmAuditRecord, compute_record_hash, hash_request,
+    verify_hash_chain,
 };
 pub use cache::{InMemoryPromptCache, JsonlPromptCache, PromptCache, SqlitePromptCache};
 pub use error::ReplayError;

@@ -1,0 +1,29 @@
+[package]
+name = "vyapaar-agent-chat"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Conversational assistant session loop, turn state machine, permission gating, and event streaming"
+
+[features]
+default = []
+test-util = []
+
+[dependencies]
+vyapaar-agent-core = { workspace = true }
+vyapaar-agent-llm = { workspace = true }
+vyapaar-agent-replay = { workspace = true }
+vyapaar-agent-prompt = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time", "rt", "macros"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }
+chrono = { workspace = true }
+rust_decimal = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }

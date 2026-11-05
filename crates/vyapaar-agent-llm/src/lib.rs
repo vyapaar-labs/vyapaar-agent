@@ -1,18 +1,24 @@
 //! LLM provider abstraction.
 //!
-//! Defines the trait contract for LLM providers (Claude, Gemini, OpenAI, etc.)
-//! and associated error types.
+//! Defines the trait contract for LLM providers (Claude, Gemini, OpenAI, etc.),
+//! streaming conversational chat events, and deterministic replay audit records.
 
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(unsafe_code)]
 
+use std::collections::VecDeque;
+use std::pin::Pin;
+use std::sync::Mutex;
+
 use async_trait::async_trait;
+use futures::Stream;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use vyapaar_agent_core::ToolSpec;
 use vyapaar_core::Decision;
 
 /// A cryptographic hash of a prompt, used for deterministic replay.
@@ -57,9 +63,213 @@ pub enum LlmError {
     /// Rate limit exceeded; too many requests in a given time window.
     #[error("rate limited")]
     RateLimited,
+    /// Context length exceeded model maximum window.
+    #[error("context length exceeded")]
+    ContextLengthExceeded,
     /// Audit record invalid or malformed.
     #[error("audit record invalid: {0}")]
     AuditRecord(String),
+}
+
+/// Role of a participant in a conversation turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatRole {
+    /// System prompt instructions.
+    System,
+    /// Human user prompt.
+    User,
+    /// Assistant response.
+    Assistant,
+    /// Tool result payload.
+    Tool,
+}
+
+/// Model tool invocation instruction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LlmToolCall {
+    /// Unique call ID assigned by model.
+    pub id: String,
+    /// Name of the target tool.
+    pub name: String,
+    /// JSON argument string.
+    pub arguments: String,
+}
+
+/// Tool execution result returned to model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LlmToolResult {
+    /// Target call ID.
+    pub call_id: String,
+    /// Output payload string.
+    pub output: String,
+    /// Whether execution failed.
+    pub is_error: bool,
+}
+
+/// Structured chat message exchanged with model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatMessage {
+    /// Role of message author.
+    pub role: ChatRole,
+    /// Text content.
+    pub content: String,
+    /// Tool calls requested by assistant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<LlmToolCall>,
+    /// Tool call ID if role is Tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+impl ChatMessage {
+    /// Create a user message.
+    pub fn user(content: impl Into<String>) -> Self {
+        Self {
+            role: ChatRole::User,
+            content: content.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+        }
+    }
+
+    /// Create an assistant text message.
+    pub fn assistant(content: impl Into<String>) -> Self {
+        Self {
+            role: ChatRole::Assistant,
+            content: content.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+        }
+    }
+
+    /// Create an assistant message with tool calls.
+    pub fn assistant_with_tools(content: impl Into<String>, tool_calls: Vec<LlmToolCall>) -> Self {
+        Self {
+            role: ChatRole::Assistant,
+            content: content.into(),
+            tool_calls,
+            tool_call_id: None,
+        }
+    }
+
+    /// Create a tool response message.
+    pub fn tool(call_id: impl Into<String>, output: impl Into<String>) -> Self {
+        Self {
+            role: ChatRole::Tool,
+            content: output.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: Some(call_id.into()),
+        }
+    }
+}
+
+/// Token usage accounting.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Usage {
+    /// Prompt tokens consumed.
+    pub input_tokens: u32,
+    /// Generated completion tokens.
+    pub output_tokens: u32,
+    /// Cached prompt tokens read from cache.
+    pub cache_read_tokens: Option<u32>,
+    /// Tokens written to prompt cache.
+    pub cache_write_tokens: Option<u32>,
+}
+
+/// Termination reason for model generation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StopReason {
+    /// Normal completion of turn.
+    EndTurn,
+    /// Stopped to request tool execution.
+    ToolUse,
+    /// Context or max_tokens limit reached.
+    MaxTokens,
+    /// Model encountered stop sequence.
+    StopSequence,
+    /// Turn paused.
+    PauseTurn,
+    /// Model refused prompt.
+    Refusal,
+    /// Content safety filter triggered.
+    ContentFilter,
+    /// Other reason.
+    Other(String),
+}
+
+/// Streaming event emitted by an LLM provider during chat generation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ChatStreamEvent {
+    /// Delta text generated for assistant message.
+    TextDelta {
+        /// Generated fragment.
+        text: String,
+    },
+    /// Model thinking / chain of thought delta.
+    ThinkingDelta {
+        /// Thinking text fragment.
+        text: String,
+    },
+    /// Beginning of a tool invocation block.
+    ToolCallStreaming {
+        /// Assigned call ID.
+        call_id: String,
+        /// Target tool name.
+        name: String,
+    },
+    /// Incremental chunk of tool call argument JSON.
+    ToolCallChunk {
+        /// Target call ID.
+        call_id: String,
+        /// Partial JSON text.
+        arguments_delta: String,
+    },
+    /// Completed tool call ready for execution.
+    ToolCallReady {
+        /// Call ID.
+        call_id: String,
+        /// Target tool name.
+        name: String,
+        /// Parsed JSON arguments if valid.
+        arguments: serde_json::Value,
+        /// Raw arguments string.
+        raw_arguments: String,
+        /// True if JSON parsing failed.
+        is_malformed: bool,
+    },
+    /// Token usage report.
+    Usage(Usage),
+    /// Message stream completion.
+    MessageEnd {
+        /// Termination reason.
+        stop_reason: StopReason,
+        /// Final assembled message.
+        message: ChatMessage,
+        /// Turn usage statistics.
+        usage: Usage,
+    },
+}
+
+/// Pinned asynchronous stream of chat generation events.
+pub type EventStream =
+    Pin<Box<dyn Stream<Item = Result<ChatStreamEvent, LlmError>> + Send + 'static>>;
+
+/// Chat request parameters sent to an LLM provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatRequest {
+    /// History of conversation messages.
+    pub messages: Vec<ChatMessage>,
+    /// System prompt instructions.
+    pub system_prompt: Option<String>,
+    /// Available tools.
+    pub tools: Vec<ToolSpec>,
+    /// Generation temperature.
+    pub temperature: Option<Decimal>,
+    /// Maximum completion tokens.
+    pub max_tokens: Option<usize>,
 }
 
 /// Computes the SHA-256 hash of a prompt string.
@@ -91,7 +301,7 @@ pub fn validate_audit_record(record: &LlmAuditRecord) -> Result<(), LlmError> {
     Ok(())
 }
 
-/// Trait for LLM providers that can generate decisions.
+/// Trait for LLM providers that can generate decisions and stream chat.
 #[async_trait]
 pub trait LlmProvider: Send + Sync + 'static {
     /// Name of the LLM model.
@@ -102,18 +312,141 @@ pub trait LlmProvider: Send + Sync + 'static {
     /// Returns the raw response and the parsed decision.
     async fn generate(&self, prompt: &str) -> Result<(String, Decision), LlmError>;
 
+    /// Stream conversational turn events.
+    async fn chat_stream(&self, _request: &ChatRequest) -> Result<EventStream, LlmError> {
+        Err(LlmError::Transport(
+            "chat streaming not implemented for this provider".to_string(),
+        ))
+    }
+
     /// Gets the context window size in tokens.
     fn context_window(&self) -> usize;
 
     /// Checks if the model supports a given feature.
     fn supports(&self, _feature: &str) -> bool {
-        false // default: no features
+        false
+    }
+}
+
+/// Scriptable mock LLM provider for deterministic unit and integration tests.
+pub struct ScriptedFakeLlm {
+    model: String,
+    streams: Mutex<VecDeque<Vec<ChatStreamEvent>>>,
+}
+
+impl ScriptedFakeLlm {
+    /// Create a new ScriptedFakeLlm with given model name.
+    pub fn new(model: impl Into<String>) -> Self {
+        Self {
+            model: model.into(),
+            streams: Mutex::new(VecDeque::new()),
+        }
+    }
+
+    /// Enqueue a scripted stream of events.
+    pub fn push_stream(&self, events: Vec<ChatStreamEvent>) {
+        self.streams.lock().unwrap().push_back(events);
+    }
+
+    /// Convenience: push a pure text completion response.
+    pub fn push_text_response(&self, text: impl Into<String>) {
+        let text = text.into();
+        let events = vec![
+            ChatStreamEvent::TextDelta { text: text.clone() },
+            ChatStreamEvent::Usage(Usage {
+                input_tokens: 10,
+                output_tokens: 10,
+                ..Default::default()
+            }),
+            ChatStreamEvent::MessageEnd {
+                stop_reason: StopReason::EndTurn,
+                message: ChatMessage::assistant(text),
+                usage: Usage {
+                    input_tokens: 10,
+                    output_tokens: 10,
+                    ..Default::default()
+                },
+            },
+        ];
+        self.push_stream(events);
+    }
+
+    /// Convenience: push a tool call response followed by an EndTurn completion.
+    pub fn push_tool_call_response(
+        &self,
+        call_id: impl Into<String>,
+        name: impl Into<String>,
+        arguments: serde_json::Value,
+    ) {
+        let call_id = call_id.into();
+        let name = name.into();
+        let raw_args = serde_json::to_string(&arguments).unwrap();
+
+        let tool_call = LlmToolCall {
+            id: call_id.clone(),
+            name: name.clone(),
+            arguments: raw_args.clone(),
+        };
+
+        let events = vec![
+            ChatStreamEvent::ToolCallStreaming {
+                call_id: call_id.clone(),
+                name: name.clone(),
+            },
+            ChatStreamEvent::ToolCallChunk {
+                call_id: call_id.clone(),
+                arguments_delta: raw_args.clone(),
+            },
+            ChatStreamEvent::ToolCallReady {
+                call_id,
+                name,
+                arguments,
+                raw_arguments: raw_args,
+                is_malformed: false,
+            },
+            ChatStreamEvent::MessageEnd {
+                stop_reason: StopReason::ToolUse,
+                message: ChatMessage::assistant_with_tools("", vec![tool_call]),
+                usage: Usage {
+                    input_tokens: 20,
+                    output_tokens: 15,
+                    ..Default::default()
+                },
+            },
+        ];
+        self.push_stream(events);
+    }
+}
+
+#[async_trait]
+impl LlmProvider for ScriptedFakeLlm {
+    fn model_name(&self) -> &str {
+        &self.model
+    }
+
+    async fn generate(&self, _prompt: &str) -> Result<(String, Decision), LlmError> {
+        Ok((
+            "{\"action\": \"hold\"}".to_string(),
+            Decision::Hold { reason: None },
+        ))
+    }
+
+    async fn chat_stream(&self, _request: &ChatRequest) -> Result<EventStream, LlmError> {
+        let events =
+            self.streams.lock().unwrap().pop_front().ok_or_else(|| {
+                LlmError::Transport("no scripted response available in fake".into())
+            })?;
+
+        let stream = futures::stream::iter(events.into_iter().map(Ok));
+        Ok(Box::pin(stream))
+    }
+
+    fn context_window(&self) -> usize {
+        128_000
     }
 }
 
 /// Trait for audit record persistence.
-///
-/// Implementations can persist records to SQLite, JSONL, or any other storage.
 pub trait AuditRecorder: Send + Sync {
     /// Records an LLM decision audit entry.
     fn record(&self, record: &LlmAuditRecord) -> Result<(), LlmError>;
@@ -132,14 +465,14 @@ pub trait AuditRecorder: Send + Sync {
 /// In-memory implementation of AuditRecorder for testing and lightweight use.
 #[derive(Debug, Default)]
 pub struct InMemoryAuditRecorder {
-    records: std::sync::Mutex<Vec<LlmAuditRecord>>,
+    records: Mutex<Vec<LlmAuditRecord>>,
 }
 
 impl InMemoryAuditRecorder {
     /// Creates a new in-memory audit recorder.
     pub fn new() -> Self {
         Self {
-            records: std::sync::Mutex::new(Vec::new()),
+            records: Mutex::new(Vec::new()),
         }
     }
 }

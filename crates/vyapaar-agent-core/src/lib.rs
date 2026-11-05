@@ -10,12 +10,15 @@
 //! - Mandatory SEBI `algo_id` validation (`^[A-Z0-9_]{4,32}$`).
 //! - Integration with [`vyapaar_risk::RiskEngine`].
 //! - Verified mathematical [`IndicatorCatalog`] preventing hallucinations.
-//! - Deterministic prompt hashing and template rendering.
+//! - Deterministic prompt hashing, structured section assembly, and template rendering.
+//! - Persistence ports (`SessionStore`, `MemoryStore`) decoupled from concrete runtimes.
 
 pub mod decision;
 pub mod error;
 pub mod indicators;
+pub mod ports;
 pub mod prompt;
+pub mod tool;
 pub mod traits;
 
 pub use decision::{
@@ -26,5 +29,15 @@ pub use indicators::{
     IndicatorCatalog, IndicatorCategory, IndicatorInvocation, IndicatorSpec, ParameterSpec,
     StrategySpec, validate_spec_indicators,
 };
-pub use prompt::{PromptHash, PromptTemplate, compute_prompt_hash, hash_prompt_hex, sha256_hex};
+pub use ports::{
+    MemoryEntry, MemoryId, MemoryKind, MemoryOrigin, MemoryProfile, MemoryQuery, MemoryStore,
+    MessageSeq, NewMemory, NewSession, PersistedMessage, ProfileBudget, RuntimeMode, SaveOutcome,
+    ScoredMemory, SessionFilter, SessionId, SessionInfo, SessionScope, SessionStore, StoreError,
+    StoreErrorKind,
+};
+pub use prompt::{
+    DefaultPromptBuilder, Placement, PromptAssembly, PromptBuilder, PromptHash, PromptSection,
+    PromptTemplate, compute_prompt_hash, default_assemble, hash_prompt_hex, sha256_hex,
+};
+pub use tool::{ToolCall, ToolError, ToolOutput, ToolSpec};
 pub use traits::LlmProvider;

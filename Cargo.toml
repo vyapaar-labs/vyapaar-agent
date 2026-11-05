@@ -14,6 +14,7 @@ members = [
   "crates/vyapaar-agent-tools",
   "crates/vyapaar-agent-plugins",
   "crates/vyapaar-agent-report",
+  "crates/vyapaar-agent-chat",
 ]
 
 [workspace.package]
@@ -38,6 +39,7 @@ vyapaar-agent-mcp = { path = "crates/vyapaar-agent-mcp" }
 vyapaar-agent-tools = { path = "crates/vyapaar-agent-tools" }
 vyapaar-agent-plugins = { path = "crates/vyapaar-agent-plugins" }
 vyapaar-agent-report = { path = "crates/vyapaar-agent-report" }
+vyapaar-agent-chat = { path = "crates/vyapaar-agent-chat" }
 vyapaar-core = { path = "../vyapaar-core" }
 vyapaar-risk = { path = "../vyapaar-risk" }
 vyapaar-ledger = { path = "../vyapaar-ledger" }
@@ -87,7 +89,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 async-trait = "0.1"
 futures = "0.3"
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
 sqlx = { version = "0.8", features = ["time", "sqlite", "chrono", "uuid", "macros", "migrate"] }
 anyhow = "1"
 bytes = "1"

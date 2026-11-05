@@ -239,3 +239,40 @@ impl AuditChainLedger {
         verify_hash_chain(&self.chain)
     }
 }
+
+/// Canonical request hash for assistant messages in chat sessions (§5.8).
+///
+/// Computes SHA-256 over:
+/// - System prompt
+/// - Tool specifications (sorted canonically by name)
+/// - Message history serialized to canonical JSON
+/// - Generation options (model, temperature, etc.)
+pub fn hash_request(
+    system_prompt: &str,
+    tool_specs: &[vyapaar_agent_core::ToolSpec],
+    messages_json: &serde_json::Value,
+    generation_options: &serde_json::Value,
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(system_prompt.as_bytes());
+    hasher.update(b"\n---TOOLS---\n");
+
+    let mut sorted_specs = tool_specs.to_vec();
+    sorted_specs.sort_by(|a, b| a.name.cmp(&b.name));
+    for spec in &sorted_specs {
+        let spec_json = serde_json::to_string(spec).unwrap_or_default();
+        hasher.update(spec_json.as_bytes());
+        hasher.update(b"\n");
+    }
+
+    hasher.update(b"\n---MESSAGES---\n");
+    let msgs_str = serde_json::to_string(messages_json).unwrap_or_default();
+    hasher.update(msgs_str.as_bytes());
+
+    hasher.update(b"\n---OPTIONS---\n");
+    let opts_str = serde_json::to_string(generation_options).unwrap_or_default();
+    hasher.update(opts_str.as_bytes());
+
+    let result = hasher.finalize();
+    sha256_hex(&result)
+}

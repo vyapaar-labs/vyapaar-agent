@@ -1,0 +1,174 @@
+//! Tool risk classification, traits, and permission prompting.
+
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+use tokio::sync::oneshot;
+
+use crate::error::ChatError;
+
+/// Risk category of a tool operation (§5.5).
+///
+/// NOTE: `Trade` and `FileWrite` are deliberately absent per NoFX principle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolRisk {
+    /// Safe, read-only queries (market quotes, positions, screener, memory search).
+    ReadOnly,
+    /// Writes to platform-managed state (memory, watchlists, monitors, generated reports).
+    LocalWrite,
+    /// CPU/runtime heavy executions (backtest runs, heavy analytics).
+    Execute,
+    /// External boundary crossings (MCP stdio plugins, remote network resources).
+    External,
+}
+
+/// Override setting for user confirmation prompts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfirmOverride {
+    /// Use default policy based on risk level.
+    #[default]
+    Default,
+    /// Always require explicit human confirmation.
+    Always,
+    /// Never prompt for confirmation (auto-allow unless policy denies).
+    Never,
+}
+
+/// Execution traits and risk profile for a ChatTool.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolTraits {
+    /// Risk classification level.
+    pub risk: ToolRisk,
+    /// Whether concurrent invocation with other concurrency_safe tools is allowed.
+    pub concurrency_safe: bool,
+    /// Optional execution timeout duration.
+    pub timeout: Option<Duration>,
+    /// User confirmation override.
+    pub confirm: ConfirmOverride,
+}
+
+impl Default for ToolTraits {
+    fn default() -> Self {
+        Self {
+            risk: ToolRisk::ReadOnly,
+            concurrency_safe: true,
+            timeout: Some(Duration::from_secs(30)),
+            confirm: ConfirmOverride::Default,
+        }
+    }
+}
+
+impl ToolTraits {
+    /// Create new traits with the given risk classification.
+    pub fn new(risk: ToolRisk) -> Self {
+        Self {
+            risk,
+            concurrency_safe: matches!(risk, ToolRisk::ReadOnly),
+            timeout: Some(Duration::from_secs(30)),
+            confirm: ConfirmOverride::Default,
+        }
+    }
+
+    /// Mark this tool as strictly serial (cannot run concurrently with other tools).
+    pub fn serial(mut self) -> Self {
+        self.concurrency_safe = false;
+        self
+    }
+
+    /// Set an explicit execution timeout.
+    pub fn timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    /// Set user confirmation override.
+    pub fn confirm(mut self, confirm: ConfirmOverride) -> Self {
+        self.confirm = confirm;
+        self
+    }
+}
+
+/// User's response to an interactive permission prompt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionDecision {
+    /// Allow this specific invocation once.
+    AllowOnce,
+    /// Allow all subsequent calls to this tool for the remainder of this session.
+    AllowForSession,
+    /// Deny this call with optional human feedback.
+    Deny {
+        /// Optional feedback explaining why the tool call was denied.
+        feedback: Option<String>,
+    },
+    /// Deny this call and immediately stop the agent turn.
+    DenyAndStop,
+}
+
+/// One-shot responder handle allowing UIs to answer a permission prompt.
+#[derive(Clone)]
+pub struct PermissionResponder {
+    sender: Arc<Mutex<Option<oneshot::Sender<PermissionDecision>>>>,
+}
+
+impl PermissionResponder {
+    /// Create a new responder wrapping a oneshot channel.
+    pub fn new(sender: oneshot::Sender<PermissionDecision>) -> Self {
+        Self {
+            sender: Arc::new(Mutex::new(Some(sender))),
+        }
+    }
+
+    /// Submit the permission decision.
+    pub fn respond(self, decision: PermissionDecision) -> Result<(), ChatError> {
+        if let Some(tx) = self.sender.lock().unwrap().take() {
+            tx.send(decision)
+                .map_err(|_| ChatError::Internal("permission receiver was dropped".into()))?;
+            Ok(())
+        } else {
+            Err(ChatError::Internal(
+                "permission already responded to".into(),
+            ))
+        }
+    }
+}
+
+impl std::fmt::Debug for PermissionResponder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PermissionResponder")
+            .finish_non_exhaustive()
+    }
+}
+
+/// A request for user approval to execute an elevated tool.
+#[derive(Debug, Clone, Serialize)]
+pub struct PermissionPrompt {
+    /// Canonical tool name.
+    pub tool: String,
+    /// Tool risk category.
+    pub risk: ToolRisk,
+    /// Human-readable summary generated by tool plan.
+    pub summary: String,
+    /// Proposed input arguments.
+    pub input: serde_json::Value,
+    /// Interactive responder channel.
+    #[serde(skip)]
+    pub responder: Option<PermissionResponder>,
+}
+
+/// Permission evaluation policy for a chat agent session.
+#[derive(Debug, Clone, Default)]
+pub enum PermissionPolicy {
+    /// Interactive mode: prompts user for write/execute tools unless granted.
+    #[default]
+    Interactive,
+    /// Headless or background mode: auto-allows only specifically listed tools.
+    NonInteractive {
+        /// Whitelist of tool names permitted to execute.
+        allow: HashSet<String>,
+    },
+}

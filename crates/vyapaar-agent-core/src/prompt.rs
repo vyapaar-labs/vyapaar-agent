@@ -1,6 +1,7 @@
-//! Prompt templates and deterministic SHA-256 prompt hashing.
+//! Prompt templates, assembly, and deterministic SHA-256 prompt hashing.
 
 use std::collections::HashMap;
+use std::fmt;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -29,8 +30,8 @@ impl PromptHash {
     }
 }
 
-impl std::fmt::Display for PromptHash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for PromptHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_hex())
     }
 }
@@ -94,3 +95,87 @@ impl PromptTemplate {
         rendered
     }
 }
+
+/// Target placement for prompt sections to ensure cache breakpoint stability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Placement {
+    /// System prompt prefix, frozen for the duration of a session or day.
+    CachedPrefix,
+    /// Per-turn contextual section prepended to user input without invalidating system prefix cache.
+    TurnContext,
+}
+
+/// A structured section contributing to prompt assembly.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptSection {
+    /// Stable section identifier for ordering.
+    pub id: String,
+    /// Intended placement location.
+    pub placement: Placement,
+    /// Formatted content.
+    pub text: String,
+}
+
+impl PromptSection {
+    /// Create a new prompt section.
+    pub fn new(id: impl Into<String>, placement: Placement, text: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            placement,
+            text: text.into(),
+        }
+    }
+}
+
+/// Assembled prompt parts segregated by placement.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptAssembly {
+    /// Frozen system prompt prefix (hit-stable for KV prompt caching).
+    pub cached_prefix: String,
+    /// Turn-specific context blocks (prepended to the current user message).
+    pub turn_context: Vec<PromptSection>,
+}
+
+/// Assemble sections into a placement-typed assembly with stable sorting.
+pub fn default_assemble(base: &str, sections: &[PromptSection]) -> PromptAssembly {
+    let mut prefix_sections: Vec<&PromptSection> = sections
+        .iter()
+        .filter(|s| s.placement == Placement::CachedPrefix && !s.text.trim().is_empty())
+        .collect();
+
+    prefix_sections.sort_by(|a, b| a.id.cmp(&b.id));
+
+    let mut prefix_parts = Vec::with_capacity(prefix_sections.len() + 1);
+    if !base.trim().is_empty() {
+        prefix_parts.push(base.trim().to_string());
+    }
+    for sec in prefix_sections {
+        prefix_parts.push(sec.text.trim().to_string());
+    }
+
+    let cached_prefix = prefix_parts.join("\n\n");
+    let turn_context = sections
+        .iter()
+        .filter(|s| s.placement == Placement::TurnContext && !s.text.trim().is_empty())
+        .cloned()
+        .collect();
+
+    PromptAssembly {
+        cached_prefix,
+        turn_context,
+    }
+}
+
+/// Builder contract for assembling model prompts deterministically.
+pub trait PromptBuilder: Send + Sync {
+    /// Assemble structured sections with a base system prompt.
+    fn assemble(&self, base: &str, sections: &[PromptSection]) -> PromptAssembly {
+        default_assemble(base, sections)
+    }
+}
+
+/// Default unit implementation of PromptBuilder.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DefaultPromptBuilder;
+
+impl PromptBuilder for DefaultPromptBuilder {}
