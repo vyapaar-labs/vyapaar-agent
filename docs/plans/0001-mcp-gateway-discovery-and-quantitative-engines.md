@@ -54,7 +54,7 @@ This document defines the architecture and implementation roadmap for incorporat
 └───────────┬──────────────────────────┘    └────────────────┬───────────┘
             │                                                │
 ┌───────────▼────────────────────────────────────────────────▼───────────┐
-│                 Universal Result Protocol (vyapaar/result/v1)           │
+│                 Universal Result Protocol (vyapaar/result/v1)          │
 │  { schema, status, meta, summary, data, blocks: [table|chart], refs }  │
 └────────────────────────────────────────────────────────────────────────┘
 ```
