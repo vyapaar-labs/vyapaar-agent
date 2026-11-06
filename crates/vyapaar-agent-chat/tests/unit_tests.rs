@@ -263,3 +263,37 @@ async fn test_headless_run() {
     assert_eq!(outcome, TurnOutcome::Completed);
     assert!(!events.is_empty());
 }
+
+#[test]
+fn test_tool_registry_vyapaar_prefix_resolution() {
+    let mut registry = ToolRegistry::new();
+    registry.register(Arc::new(FakeChatTool::new(
+        "market_quote",
+        ToolRisk::ReadOnly,
+    )));
+    registry.register(Arc::new(FakeChatTool::new(
+        "research_calc",
+        ToolRisk::ReadOnly,
+    )));
+    registry.register(Arc::new(FakeChatTool::new(
+        "screener_scan",
+        ToolRisk::ReadOnly,
+    )));
+
+    // Exact resolution
+    assert!(registry.get("market_quote").is_some());
+
+    // vyapaar_ prefix resolution
+    assert!(registry.get("vyapaar_market_quote").is_some());
+    assert!(registry.get("vyapaar_research_calc").is_some());
+
+    // Canonical alias resolution
+    assert!(registry.get("vyapaar_ticker_price").is_some());
+    assert!(registry.get("vyapaar_calculate").is_some());
+    assert!(registry.get("vyapaar_screener").is_some());
+
+    // Snapshot also supports resolution
+    let snapshot = registry.snapshot();
+    assert!(snapshot.get("vyapaar_market_quote").is_some());
+    assert!(snapshot.get("vyapaar_calculate").is_some());
+}

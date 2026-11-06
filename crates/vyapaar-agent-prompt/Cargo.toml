@@ -8,3 +8,6 @@ license.workspace = true
 vyapaar-agent-core = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

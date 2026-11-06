@@ -1,6 +1,9 @@
 //! Prompt templates, chat system prompts, and context section renderers.
 
+pub mod persona;
+
 use chrono::{DateTime, Utc};
+pub use persona::AgentPersona;
 use vyapaar_agent_core::{MemoryEntry, MemoryKind, Placement, PromptSection, ScoredMemory};
 
 /// Legacy prompt template helper supporting `{{context}}` placeholder substitution.

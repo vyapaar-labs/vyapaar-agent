@@ -1,0 +1,69 @@
+{
+  "version": "1.0.0",
+  "description": "Default bundled agent skills packaged with vyapaar-agent / vyapaar-cli installation.",
+  "skills": [
+    {
+      "id": "vyapaar-ai",
+      "title": "VyapaarAI",
+      "tagline": "The all-round analyst. Picks the tools, lenses and depth each question needs.",
+      "path": "vyapaar-ai/SKILL.md",
+      "builtin": true
+    },
+    {
+      "id": "analyst",
+      "title": "Analyst",
+      "tagline": "Fundamental equity research and forensic reading of financial statements.",
+      "path": "analyst/SKILL.md",
+      "builtin": true
+    },
+    {
+      "id": "quant",
+      "title": "Quant",
+      "tagline": "Statistics, factor modeling, backtests and empirical rigor over opinions.",
+      "path": "quant/SKILL.md",
+      "builtin": true
+    },
+    {
+      "id": "risk-manager",
+      "title": "Risk Manager",
+      "tagline": "Downside first: drawdowns, stress tests, sizing, liquidity and hedges.",
+      "path": "risk-manager/SKILL.md",
+      "builtin": true
+    },
+    {
+      "id": "trader",
+      "title": "Trader",
+      "tagline": "Price action and levels turned into a plan: entry, stop, targets, risk-reward.",
+      "path": "trader/SKILL.md",
+      "builtin": true
+    },
+    {
+      "id": "portfolio-manager",
+      "title": "Portfolio Manager",
+      "tagline": "Asset allocation, diversification, drift, rebalancing and risk-adjusted return.",
+      "path": "portfolio-manager/SKILL.md",
+      "builtin": true
+    },
+    {
+      "id": "macro-strategist",
+      "title": "Macro Strategist",
+      "tagline": "Top-down macro regimes, policy, rates, currencies and cross-asset transmission.",
+      "path": "macro-strategist/SKILL.md",
+      "builtin": true
+    },
+    {
+      "id": "value-investor",
+      "title": "Value Investor",
+      "tagline": "Moats, owner earnings and intrinsic value with a margin of safety.",
+      "path": "value-investor/SKILL.md",
+      "builtin": true
+    },
+    {
+      "id": "devils-advocate",
+      "title": "Devil's Advocate",
+      "tagline": "Stress-test theses, surface hidden risks and build rigorous bear cases.",
+      "path": "devils-advocate/SKILL.md",
+      "builtin": true
+    }
+  ]
+}

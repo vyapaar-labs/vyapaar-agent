@@ -133,9 +133,9 @@ impl ToolRegistry {
         }
     }
 
-    /// Retrieve a tool by name.
+    /// Retrieve a tool by name, supporting optional `vyapaar_` prefix and aliases.
     pub fn get(&self, name: &str) -> Option<Arc<dyn ChatTool>> {
-        self.tools.get(name).cloned()
+        resolve_tool(&self.tools, name)
     }
 
     /// Return all tool specifications.
@@ -160,9 +160,9 @@ pub struct ToolSet {
 }
 
 impl ToolSet {
-    /// Retrieve tool from snapshot.
+    /// Retrieve tool from snapshot, supporting optional `vyapaar_` prefix and aliases.
     pub fn get(&self, name: &str) -> Option<Arc<dyn ChatTool>> {
-        self.tools.get(name).cloned()
+        resolve_tool(&self.tools, name)
     }
 
     /// Return tool specifications in snapshot.
@@ -171,4 +171,48 @@ impl ToolSet {
         list.sort_by(|a, b| a.name.cmp(&b.name));
         list
     }
+}
+
+/// Helper resolving tool by exact name, `vyapaar_` prefix, or canonical alias.
+fn resolve_tool(
+    tools: &HashMap<String, Arc<dyn ChatTool>>,
+    name: &str,
+) -> Option<Arc<dyn ChatTool>> {
+    if let Some(tool) = tools.get(name) {
+        return Some(Arc::clone(tool));
+    }
+    // 1. Try stripping `vyapaar_` prefix
+    if let Some(stripped) = name.strip_prefix("vyapaar_") {
+        if let Some(tool) = tools.get(stripped) {
+            return Some(Arc::clone(tool));
+        }
+        // Friendly alias mappings:
+        let alias = match stripped {
+            "calculate" => "research_calc",
+            "ticker_price" => "market_quote",
+            "price_history" => "market_history",
+            "ticker_technicals" => "market_indicators",
+            "screener" => "screener_scan",
+            "portfolio" | "portfolios" => "portfolio_view",
+            "positions" => "positions_view",
+            "orders" => "orders_view",
+            "tax_lots" | "taxlots" => "taxlots_view",
+            "pnl" => "pnl_view",
+            "macro" => "macro_series",
+            "backtest" => "run_backtest",
+            _ => "",
+        };
+        if !alias.is_empty() {
+            if let Some(tool) = tools.get(alias) {
+                return Some(Arc::clone(tool));
+            }
+        }
+    } else {
+        // 2. Try prepending `vyapaar_` prefix
+        let prefixed = format!("vyapaar_{}", name);
+        if let Some(tool) = tools.get(&prefixed) {
+            return Some(Arc::clone(tool));
+        }
+    }
+    None
 }
