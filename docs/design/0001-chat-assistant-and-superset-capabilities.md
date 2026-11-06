@@ -792,7 +792,7 @@ The ported code is the source of truth; before phase A, confirm:
 
 | Phase | Content | Repos |
 | :--- | :--- | :--- |
-| **A — Conversation core** | `vyapaar-agent-core::ports` (`SessionStore`, `MemoryStore` traits, `StoreError`, shared `ToolSpec`/`ToolOutput`/`ToolError`), `PromptAssembly`; `vyapaar-agent-chat` loop with `ScriptedFakeLlm` tests; R1–R5 dependency test; `vyapaar-runtime-persistence` session tables + `SessionStore` impl; `vyapaar-cli ask` + `vyapaar-tui` AgentChat wired | agent, runtime, ui |
+| **A — Conversation core** | `vyapaar-agent-core::ports` (`SessionStore`, `MemoryStore` traits, `StoreError`, shared `ToolSpec`/`ToolOutput`/`ToolError`), `PromptAssembly`; `vyapaar-agent-chat` loop with `ScriptedFakeLlm` tests; R1–R5 dependency test; `vyapaar-runtime-persistence` session tables + `SessionStore` impl; `vyapaar-cli ask` + `vyapaar-tui` AgentChat wired *(Agent repo: Complete; Runtime & UI: In Progress)* | agent, runtime, ui |
 | **B — Read-only tools** | `vyapaar-agent-chat-tools` with market, portfolio, lifted pure tools, `research_calc`; `vyapaar-runtime-api` port adapters | agent, runtime |
 | **C — Memory** | `UserMemory`, memory tables + FTS, profile/recall placement, cache-hit regression test (assert cache-read tokens > 0 from turn 2 with `MemoryProfile` unchanged) | agent, runtime |
 | **D — Monitors & background tasks** | runtime's own jobs design doc; `JobSpec::{Monitor, AgentTask, MemoryMaintenance}`; `MonitorScheduler` adapter; monitor/backtest tools | runtime (lead), agent |
