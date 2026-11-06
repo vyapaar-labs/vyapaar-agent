@@ -25,6 +25,7 @@ pub mod cost_stress;
 pub mod dsr;
 pub mod equity_stats;
 pub mod error;
+pub mod factor_attribution;
 pub mod holdout;
 pub mod math;
 pub mod monte_carlo;
@@ -39,6 +40,10 @@ pub use cost_stress::{CostStressConfig, CostStressResult, compute_cost_stress};
 pub use dsr::{DsrConfig, DsrResult, compute_dsr, expected_max_sharpe};
 pub use equity_stats::EquityStats;
 pub use error::{AnalyticsError, Result};
+pub use factor_attribution::{
+    FactorAttribution, FactorContribution, PortfolioHolding, SectorExposure, StyleExposure,
+    factor_attribution_blocks, fit_cross_sectional_factor_model,
+};
 pub use holdout::{HoldoutConfig, HoldoutResult, compute_holdout};
 pub use monte_carlo::{MonteCarloConfig, MonteCarloResult, run_block_bootstrap};
 pub use pbo::{PboConfig, PboResult, compute_pbo};

@@ -12,6 +12,7 @@ name = "vyapaar_agent_analytics"
 
 [dependencies]
 vyapaar-core.workspace = true
+vyapaar-agent-core = { path = "../vyapaar-agent-core" }
 schemars.workspace = true
 serde.workspace = true
 thiserror.workspace = true
