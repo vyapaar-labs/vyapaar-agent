@@ -18,3 +18,9 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "json"] }
 futures = { workspace = true }
 rust_decimal = { workspace = true }
 rust_decimal_macros = { workspace = true }
+reqwest = { workspace = true, features = ["stream"] }
+bytes = { workspace = true }
+
+[dev-dependencies]
+axum = { workspace = true }
+tokio = { workspace = true, features = ["full"] }

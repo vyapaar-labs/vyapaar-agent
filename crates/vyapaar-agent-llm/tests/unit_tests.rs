@@ -27,6 +27,7 @@ fn test_validate_record() {
     let record = LlmAuditRecord {
         timestamp_utc: Utc::now(),
         model: "test-model".to_string(),
+        provider: "test-provider".to_string(),
         temperature: dec!(0.7),
         seed: 42,
         prompt_sha256: hash_prompt("test prompt"),
@@ -44,6 +45,7 @@ fn test_in_memory_audit_recorder() {
     let record = LlmAuditRecord {
         timestamp_utc: Utc::now(),
         model: "test".to_string(),
+        provider: "test-provider".to_string(),
         temperature: dec!(0.5),
         seed: 1,
         prompt_sha256: hash_prompt("test"),
@@ -55,4 +57,23 @@ fn test_in_memory_audit_recorder() {
     recorder.record(&record).unwrap();
     let retrieved = recorder.retrieve(&hash_prompt("test")).unwrap();
     assert_eq!(retrieved.parsed_decision, record.parsed_decision);
+    // The provider field round-trips through the audit recorder.
+    assert_eq!(retrieved.provider, "test-provider");
+}
+
+#[test]
+fn test_validate_record_rejects_empty_provider() {
+    let record = LlmAuditRecord {
+        timestamp_utc: Utc::now(),
+        model: "test-model".to_string(),
+        provider: String::new(),
+        temperature: dec!(0.5),
+        seed: 42,
+        prompt_sha256: hash_prompt("test prompt"),
+        raw_prompt: "test prompt".to_string(),
+        raw_response: "test".to_string(),
+        parsed_decision: Decision::Hold { reason: None },
+    };
+    let err = validate_record(&record).unwrap_err();
+    assert!(err.to_string().contains("provider"));
 }

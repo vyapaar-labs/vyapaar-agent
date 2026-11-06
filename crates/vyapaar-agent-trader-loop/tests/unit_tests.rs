@@ -81,3 +81,40 @@ fn test_trader_loop_evaluates_decision_against_risk_engine() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn test_trader_loop_run_wires_prompt_generate_validate_risk() {
+    let config = TraderConfig {
+        name: "test_trader".to_string(),
+        universe: vec!["TCS".to_string()],
+        llm: Arc::new(MockLlm),
+        risk_limits: RiskLimits::default(),
+    };
+
+    let trader = TraderLoop::new(config);
+
+    // The prompt reflects the loop name and universe.
+    let prompt = trader.build_prompt();
+    assert!(prompt.contains("test_trader"));
+    assert!(prompt.contains("TCS"));
+
+    let mut risk_engine = RiskEngine::new(RiskLimits::default(), OtrConfig::default());
+    risk_engine.register_algo("ALGO_01");
+
+    let decision = trader.run(&mut risk_engine, Utc::now()).await.expect("run");
+    assert_eq!(
+        decision,
+        Decision::Hold {
+            reason: Some("Mock hold".into())
+        }
+    );
+
+    // run_decision performs structural validation without the risk gate.
+    let decision = trader.run_decision(None, None).await.expect("run_decision");
+    assert_eq!(
+        decision,
+        Decision::Hold {
+            reason: Some("Mock hold".into())
+        }
+    );
+}

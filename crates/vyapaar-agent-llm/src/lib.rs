@@ -6,6 +6,7 @@
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(unsafe_code)]
+#![allow(clippy::collapsible_if)]
 
 use std::collections::VecDeque;
 use std::pin::Pin;
@@ -20,6 +21,12 @@ use thiserror::Error;
 
 use vyapaar_agent_core::ToolSpec;
 use vyapaar_core::Decision;
+
+pub mod config;
+pub mod openai_compat;
+
+pub use config::{LlmConfig, llm_config_from_env, llm_config_from_map, openai_provider_from_env};
+pub use openai_compat::{FreeTierPolicy, OpenAiCompatibleProvider, is_free_tier_model};
 
 /// A cryptographic hash of a prompt, used for deterministic replay.
 ///
@@ -37,6 +44,11 @@ pub struct LlmAuditRecord {
     pub timestamp_utc: chrono::DateTime<chrono::Utc>,
     /// Model identifier (e.g. "claude-3-opus-20240229")
     pub model: String,
+    /// Provider / endpoint that served the call (e.g. "omniroute",
+    /// "openai", "ollama"). Captured so the replay hash distinguishes which
+    /// backend answered a logical request when a router may vary it.
+    #[serde(default)]
+    pub provider: String,
     /// Temperature used for sampling (0.0 to 1.0) with Decimal precision
     pub temperature: Decimal,
     /// Random seed for reproducibility
@@ -69,6 +81,12 @@ pub enum LlmError {
     /// Audit record invalid or malformed.
     #[error("audit record invalid: {0}")]
     AuditRecord(String),
+    /// Decision parse failure from raw model output.
+    #[error("decision parse failed: {0}")]
+    ParsingFailed(String),
+    /// The configured endpoint reported a model outside the free-tier allowlist.
+    #[error("endpoint reported non-free-tier model: {0}")]
+    NonFreeTierModel(String),
 }
 
 /// Role of a participant in a conversation turn.
@@ -289,6 +307,11 @@ pub fn validate_audit_record(record: &LlmAuditRecord) -> Result<(), LlmError> {
     }
     if record.model.trim().is_empty() {
         return Err(LlmError::AuditRecord("model cannot be empty".to_string()));
+    }
+    if record.provider.trim().is_empty() {
+        return Err(LlmError::AuditRecord(
+            "provider cannot be empty".to_string(),
+        ));
     }
     if record.temperature < Decimal::ZERO || record.temperature > Decimal::ONE {
         return Err(LlmError::AuditRecord(

@@ -22,6 +22,11 @@ pub struct LlmAuditRecord {
     pub timestamp_utc: DateTime<Utc>,
     /// Model identifier name (e.g. "claude-3-5-sonnet", "gemini-1.5-pro")
     pub model: String,
+    /// Provider / endpoint that served the call (e.g. "omniroute",
+    /// "openai", "ollama"). Part of the hash chain so a multi-provider router
+    /// that varies the backend per call is captured in the audit trail.
+    #[serde(default)]
+    pub provider: String,
     /// Sampling temperature (exact Decimal, zero floats)
     pub temperature: Decimal,
     /// Random seed for deterministic inference
@@ -57,6 +62,7 @@ impl LlmAuditRecord {
         Self {
             timestamp_utc,
             model: model.into(),
+            provider: String::new(),
             temperature,
             seed,
             prompt_sha256,
@@ -65,6 +71,12 @@ impl LlmAuditRecord {
             raw_response: raw_response.into(),
             parsed_decision,
         }
+    }
+
+    /// Attach the provider/endpoint identifier that served this call.
+    pub fn with_provider(mut self, provider: impl Into<String>) -> Self {
+        self.provider = provider.into();
+        self
     }
 
     /// Return lowercase hex string of prompt_sha256.
@@ -122,6 +134,7 @@ pub fn compute_record_hash(prev_hash: &[u8; 32], seq: u64, record: &LlmAuditReco
         hasher.update(&record.timestamp_utc.timestamp().to_be_bytes());
     }
     hasher.update(record.model.as_bytes());
+    hasher.update(record.provider.as_bytes());
     hasher.update(record.temperature.to_string().as_bytes());
     hasher.update(&record.seed.to_be_bytes());
     hasher.update(&record.prompt_sha256);

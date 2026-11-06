@@ -8,7 +8,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use vyapaar_agent_core::{LlmProvider, compute_prompt_hash, sha256_hex};
+use vyapaar_agent_core::{compute_prompt_hash, sha256_hex};
+use vyapaar_agent_llm::LlmProvider;
 use vyapaar_core::{Decision, Exchange, InstrumentId, OrderRequest, OrderSide, OrderType};
 
 use crate::audit::{ChainedLlmAuditRecord, LlmAuditRecord};

@@ -130,3 +130,28 @@ pub fn render_turn_notice(notice: &str) -> PromptSection {
         format!("[Background Notice: {}]", notice),
     )
 }
+
+/// Render the trading-decision system prompt for the closed-grammar trader loop.
+///
+/// Instructs the model to emit exactly one JSON object conforming to the
+/// [`vyapaar_core::Decision`] closed grammar (`action` tagged enum with
+/// `deny_unknown_fields`). The trader loop feeds the response through
+/// `DecisionParser::parse_and_validate`; this prompt is advisory only and the
+/// risk gate remains the non-bypassable authority.
+pub fn render_trading_decision_system_prompt(name: &str, universe: &[String]) -> String {
+    let universe_line = if universe.is_empty() {
+        "The trading universe is unrestricted; symbols must be non-empty.".to_string()
+    } else {
+        format!("Allowed universe: {}.", universe.join(", "))
+    };
+    format!(
+        "You are the closed-grammar trading decision engine for strategy '{name}'.\n\
+         {universe_line}\n\
+         Respond with EXACTLY ONE JSON object using the closed Decision grammar.\n\
+         Valid actions: place_order (fields: symbol, side, qty, price_limit, algo_id, rationale), \
+         modify_order (instrument, new_qty, new_price, algo_id, rationale), \
+         cancel_order (instrument, algo_id, rationale), \
+         cancel_all (algo_id, reason), hold (reason).\n\
+         Output only the JSON object. No prose, no markdown fences, no additional fields."
+    )
+}

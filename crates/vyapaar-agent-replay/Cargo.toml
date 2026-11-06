@@ -9,6 +9,7 @@ description = "Cryptographic prompt and decision replay harness with SQLite WAL 
 vyapaar-core.workspace = true
 vyapaar-risk.workspace = true
 vyapaar-agent-core = { path = "../vyapaar-agent-core" }
+vyapaar-agent-llm = { path = "../vyapaar-agent-llm" }
 serde.workspace = true
 serde_json.workspace = true
 rust_decimal.workspace = true

@@ -18,13 +18,13 @@ pub mod error;
 pub mod indicators;
 pub mod ports;
 pub mod prompt;
+pub mod result;
 pub mod tool;
-pub mod traits;
 
 pub use decision::{
     DecisionParser, SEBI_ALGO_ID_REGEX, extract_json_payload, is_valid_sebi_algo_id,
 };
-pub use error::{CatalogError, DecisionError, LlmError};
+pub use error::{CatalogError, DecisionError};
 pub use indicators::{
     IndicatorCatalog, IndicatorCategory, IndicatorInvocation, IndicatorSpec, ParameterSpec,
     StrategySpec, validate_spec_indicators,
@@ -39,5 +39,5 @@ pub use prompt::{
     DefaultPromptBuilder, Placement, PromptAssembly, PromptBuilder, PromptHash, PromptSection,
     PromptTemplate, compute_prompt_hash, default_assemble, hash_prompt_hex, sha256_hex,
 };
+pub use result::{DisplayBlock, ExecutionMeta, MetricItem, ResultStatus, VyapaarResultEnvelope};
 pub use tool::{ToolCall, ToolError, ToolOutput, ToolSpec};
-pub use traits::LlmProvider;

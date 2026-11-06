@@ -120,23 +120,3 @@ pub enum CatalogError {
     #[error("Strategy specification validation failed: {0}")]
     SpecValidationFailed(String),
 }
-
-/// Errors that can occur during LLM provider operations.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum LlmError {
-    /// Transport error occurred during LLM communication.
-    #[error("transport: {0}")]
-    Transport(String),
-    /// Authentication failure (invalid credentials, expired token, etc.).
-    #[error("auth failure")]
-    Auth,
-    /// Rate limit exceeded.
-    #[error("rate limited")]
-    RateLimited,
-    /// Audit record invalid or malformed.
-    #[error("audit record invalid: {0}")]
-    AuditRecord(String),
-    /// Decision parsing failure.
-    #[error("parsing failed: {0}")]
-    ParsingFailed(String),
-}

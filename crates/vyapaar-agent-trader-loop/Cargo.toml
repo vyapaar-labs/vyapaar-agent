@@ -8,9 +8,12 @@ license.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 chrono.workspace = true
+thiserror.workspace = true
 vyapaar-core = { workspace = true }
 vyapaar-risk = { workspace = true }
+vyapaar-agent-core = { path = "../vyapaar-agent-core" }
 vyapaar-agent-llm = { path = "../vyapaar-agent-llm" }
+vyapaar-agent-prompt = { path = "../vyapaar-agent-prompt" }
 
 [dev-dependencies]
 async-trait.workspace = true

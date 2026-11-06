@@ -271,7 +271,7 @@ async fn test_prompt_replayer_intercept_query() {
 
     // Intercept with cache hit
     let (resp, dec) = replayer
-        .intercept_query::<dyn vyapaar_agent_core::LlmProvider>(prompt1, None)
+        .intercept_query::<dyn vyapaar_agent_llm::LlmProvider>(prompt1, None)
         .await
         .expect("Cache hit should return without LLM provider");
     assert_eq!(resp, raw1);
@@ -280,7 +280,7 @@ async fn test_prompt_replayer_intercept_query() {
     // Intercept with cache miss in backtest mode: must raise deterministic CacheMiss error
     let unrecorded_prompt = "Prompt not in archive";
     let miss_err = replayer
-        .intercept_query::<dyn vyapaar_agent_core::LlmProvider>(unrecorded_prompt, None)
+        .intercept_query::<dyn vyapaar_agent_llm::LlmProvider>(unrecorded_prompt, None)
         .await;
 
     assert!(matches!(miss_err, Err(ReplayError::CacheMiss { .. })));

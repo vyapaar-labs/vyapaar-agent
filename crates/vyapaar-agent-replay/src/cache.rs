@@ -330,6 +330,7 @@ impl SqlitePromptCache {
                 let record = LlmAuditRecord {
                     timestamp_utc,
                     model,
+                    provider: String::new(),
                     temperature,
                     seed: seed_i64 as u64,
                     prompt_sha256: *prompt_hash,
@@ -397,6 +398,7 @@ impl SqlitePromptCache {
             let record = LlmAuditRecord {
                 timestamp_utc,
                 model,
+                provider: String::new(),
                 temperature,
                 seed: seed as u64,
                 prompt_sha256,
