@@ -1,6 +1,12 @@
 # 0004 — Free-Tier Multi-Provider LLM Backend (OmniRoute), Local SLM Deferred to Last
 
-> **Status**: Proposed — not yet implemented.
+> **Status**: Implemented through Phase 3 — trait duplication resolved,
+> `OpenAiCompatibleProvider` + env config + `FreeTierPolicy` guardrail,
+> `TraderLoop::run()` wired through `DecisionParser`, all four workloads
+> injected (chat example + research/report `llm` features), golden fixtures
+> with risk-gate acceptance oracle. **Phase 4 (local SLM) remains deferred by
+> design** (strict internal order; needs the Phase-3 fixture dataset and model
+> licensing/fine-tuning per `0005`).
 > **Target Crates**: `vyapaar-agent-llm`, `vyapaar-agent-trader-loop`, `vyapaar-agent-chat`, `vyapaar-agent-research`, `vyapaar-agent-report`.
 > **Depends on reading**:
 > - `vyapaar-agent/docs/plans/0005-local-slm-model-selection-and-reliability-reference.md` (the

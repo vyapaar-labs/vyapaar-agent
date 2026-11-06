@@ -1,6 +1,10 @@
 # 0003 — Remaining Fincept Analytics Engines Not Yet Scoped
 
-> **Status**: Proposed — not yet implemented.
+> **Status**: Implemented — all three phases landed in `vyapaar-agent`:
+> Phase 1 `vyapaar-agent-forecast` (Theta/ETS/ARIMA/TBATS + gradient-boosted
+> trees, MCP tool `vyapaar_forecast_series`), Phase 2 `factor_attribution.rs`
+> in `vyapaar-agent-analytics`, Phase 3 `vyapaar-agent-panel`
+> (fixed/random effects, Fama-MacBeth, 2SLS IV/GMM, GRS test).
 > **Target Crates**: new `vyapaar-agent-panel`, new `vyapaar-agent-forecast`, extend existing `vyapaar-agent-analytics`.
 > **Depends on reading**:
 > - `vyapaar-agent/docs/plans/0001-mcp-gateway-discovery-and-quantitative-engines.md`
