@@ -21,6 +21,7 @@ vyapaar-risk.workspace = true
 vyapaar-agent-core = { path = "../vyapaar-agent-core" }
 vyapaar-agent-analytics = { path = "../vyapaar-agent-analytics" }
 vyapaar-agent-llm = { path = "../vyapaar-agent-llm" }
+vyapaar-agent-forecast = { path = "../vyapaar-agent-forecast" }
 uuid.workspace = true
 bytes = "1.4"
 rand = "0.8"

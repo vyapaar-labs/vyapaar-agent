@@ -62,6 +62,7 @@ async fn test_mcp_tools_list() {
         assert!(tool_names.contains(&"evaluate_metrics"));
         assert!(tool_names.contains(&"optimize_strategy"));
         assert!(tool_names.contains(&"explain_decision"));
+        assert!(tool_names.contains(&"vyapaar_forecast_series"));
     } else {
         panic!("unexpected response type");
     }
@@ -350,6 +351,72 @@ async fn test_tool_explain_decision() {
                 .unwrap()
                 .contains("HDFCBANK.NSE")
         );
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_tool_forecast_series() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(10),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_forecast_series",
+            "arguments": {
+                "series": [100.0, 101.2, 100.7, 102.4, 103.1, 104.0],
+                "horizon": 3,
+                "model": "theta"
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none());
+        let res = result.unwrap();
+        let structured = &res["structuredContent"];
+        assert_eq!(structured["schema"], "vyapaar/result/v1");
+        assert_eq!(structured["status"], "ok");
+        assert_eq!(structured["data"]["model"]["kind"], "theta");
+        assert_eq!(structured["data"]["horizon"], 3);
+        assert_eq!(structured["data"]["point"]["steps"], json!([1, 2, 3]));
+        assert_eq!(
+            structured["data"]["point"]["values"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        let interval = &structured["data"]["interval"];
+        assert_eq!(interval["lower"].as_array().unwrap().len(), 3);
+        assert_eq!(interval["upper"].as_array().unwrap().len(), 3);
+        let blocks = structured["blocks"].as_array().unwrap();
+        assert!(blocks.iter().any(|b| b["type"] == "metric_grid"));
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_tool_forecast_series_rejects_bad_model() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(11),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_forecast_series",
+            "arguments": {
+                "series": [1.0, 2.0, 3.0],
+                "model": "black_magic"
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { error, .. } = resp {
+        assert!(error.is_some(), "unknown model must error");
     } else {
         panic!("unexpected response type");
     }

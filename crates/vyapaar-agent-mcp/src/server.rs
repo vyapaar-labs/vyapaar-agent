@@ -5,7 +5,7 @@ use serde_json::json;
 
 use crate::error::McpError;
 use crate::tools::{
-    BacktestDispatcherService, DecisionExplainorService, IndicatorCatalogService,
+    BacktestDispatcherService, DecisionExplainorService, ForecastService, IndicatorCatalogService,
     MetricsCalculatorService, SpecValidatorService, StrategyOptimizerService,
     list_tool_definitions,
 };
@@ -93,6 +93,7 @@ pub struct McpServer {
     pub metrics_calculator: MetricsCalculatorService,
     pub strategy_optimizer: StrategyOptimizerService,
     pub decision_explainor: DecisionExplainorService,
+    pub forecast: ForecastService,
 }
 
 impl Default for McpServer {
@@ -111,6 +112,7 @@ impl McpServer {
             metrics_calculator: MetricsCalculatorService::new(),
             strategy_optimizer: StrategyOptimizerService::new(),
             decision_explainor: DecisionExplainorService::new(),
+            forecast: ForecastService::new(),
         }
     }
 
@@ -259,6 +261,7 @@ impl McpServer {
                 self.decision_explainor
                     .explain(decision, market_context, risk_check_results)
             }
+            "vyapaar_forecast_series" => self.forecast.forecast_series(&arguments),
             _ => Err(McpError::MethodNotFound(format!("unknown tool: {name}"))),
         }
     }

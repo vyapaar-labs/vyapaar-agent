@@ -17,6 +17,9 @@ use uuid::Uuid;
 use vyapaar_agent_core::indicators::{
     IndicatorCatalog as CoreIndicatorCatalog, IndicatorInvocation, StrategySpec as CoreStrategySpec,
 };
+use vyapaar_agent_core::{DisplayBlock, MetricItem, VyapaarResultEnvelope};
+use vyapaar_agent_forecast::{ForecastConfig, ForecastModel, fit_and_forecast};
+use vyapaar_core::QuantSeries;
 use vyapaar_risk::RiskEngine;
 
 use crate::error::McpError;
@@ -228,6 +231,43 @@ pub fn list_tool_definitions() -> Vec<serde_json::Value> {
                     }
                 },
                 "required": ["decision", "market_context", "risk_check_results"]
+            }
+        }),
+        json!({
+            "name": "vyapaar_forecast_series",
+            "category": "forecast",
+            "description": "Forecasts a time series with Theta / ETS / Holt-Winters / ARIMA / TBATS / gradient-boosted trees, returning point forecasts plus a prediction interval",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "series": {
+                        "type": "array",
+                        "items": { "type": "number" },
+                        "description": "Observed series values in chronological order"
+                    },
+                    "horizon": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Number of steps to forecast"
+                    },
+                    "model": {
+                        "type": "string",
+                        "enum": ["theta", "ets", "holt_winters", "arima", "tbats", "gradient_boost"],
+                        "description": "Forecast engine to use"
+                    },
+                    "seasonal_period": {
+                        "type": "integer",
+                        "description": "Seasonal period for holt_winters / tbats"
+                    },
+                    "p": { "type": "integer", "description": "AR order (arima)" },
+                    "d": { "type": "integer", "description": "Differencing order (arima)" },
+                    "q": { "type": "integer", "description": "MA order (arima)" },
+                    "lags": { "type": "integer", "description": "Lag count (gradient_boost)" },
+                    "n_estimators": { "type": "integer", "description": "Boosting rounds (gradient_boost)" },
+                    "max_depth": { "type": "integer", "description": "Tree depth (gradient_boost)" },
+                    "learning_rate": { "type": "number", "description": "Shrinkage (gradient_boost)" }
+                },
+                "required": ["series"]
             }
         }),
     ]
@@ -753,6 +793,126 @@ impl DecisionExplainorService {
             "passed_pre_trade_risk": passed_all,
             "explanation": explanation
         }))
+    }
+}
+
+/// Time-series forecast service wrapping `vyapaar-agent-forecast` (0003 Phase 1).
+pub struct ForecastService;
+
+impl Default for ForecastService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ForecastService {
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Run a forecast over an observed series and return a `vyapaar/result/v1`
+    /// envelope with a metric-grid block.
+    pub fn forecast_series(&self, args: &serde_json::Value) -> Result<serde_json::Value, McpError> {
+        let series_val = args
+            .get("series")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| McpError::InvalidArguments("missing series array".to_string()))?;
+        let horizon = args.get("horizon").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+        let model = parse_forecast_model(args)?;
+
+        let decimals: Vec<Decimal> = series_val
+            .iter()
+            .map(|v| {
+                v.as_f64()
+                    .and_then(Decimal::from_f64_retain)
+                    .unwrap_or_default()
+            })
+            .collect();
+        let series = QuantSeries::new(decimals);
+
+        let config = ForecastConfig {
+            horizon,
+            model,
+            prediction_interval_pct: 0.80,
+        };
+        let output = fit_and_forecast(&series, &config)
+            .map_err(|e| McpError::Internal(format!("forecast failed: {e}")))?;
+        let point_count = output.point.values.len();
+        let model_label = model_name(&output.model);
+
+        let summary =
+            format!("Forecast of {horizon} steps for {model_label} ({point_count} point values).");
+        let envelope =
+            VyapaarResultEnvelope::ok(summary, output).with_block(DisplayBlock::MetricGrid {
+                items: vec![
+                    MetricItem {
+                        label: "model".to_string(),
+                        value: model_label.to_string(),
+                    },
+                    MetricItem {
+                        label: "horizon".to_string(),
+                        value: horizon.to_string(),
+                    },
+                    MetricItem {
+                        label: "point_forecasts".to_string(),
+                        value: point_count.to_string(),
+                    },
+                ],
+            });
+
+        serde_json::to_value(envelope).map_err(McpError::Json)
+    }
+}
+
+/// Human-readable name for a forecast model.
+fn model_name(model: &ForecastModel) -> &'static str {
+    match model {
+        ForecastModel::Theta => "theta",
+        ForecastModel::Ets => "ets",
+        ForecastModel::EtsHw { .. } => "holt_winters",
+        ForecastModel::Arima { .. } => "arima",
+        ForecastModel::Tbats { .. } => "tbats",
+        ForecastModel::GradientBoost { .. } => "gradient_boost",
+    }
+}
+
+/// Parse the `model` selection (and its parameters) from tool arguments.
+fn parse_forecast_model(args: &serde_json::Value) -> Result<ForecastModel, McpError> {
+    let name = args
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("theta");
+    let int = |key: &str, default: usize| -> usize {
+        args.get(key)
+            .and_then(|v| v.as_u64())
+            .unwrap_or(default as u64) as usize
+    };
+    match name {
+        "theta" => Ok(ForecastModel::Theta),
+        "ets" => Ok(ForecastModel::Ets),
+        "holt_winters" => Ok(ForecastModel::EtsHw {
+            period: int("seasonal_period", 5),
+        }),
+        "arima" => Ok(ForecastModel::Arima {
+            p: int("p", 1),
+            d: int("d", 1),
+            q: int("q", 0),
+        }),
+        "tbats" => Ok(ForecastModel::Tbats {
+            seasonal_period: int("seasonal_period", 5),
+        }),
+        "gradient_boost" => Ok(ForecastModel::GradientBoost {
+            lags: int("lags", 5),
+            n_estimators: int("n_estimators", 100),
+            max_depth: int("max_depth", 3),
+            learning_rate: args
+                .get("learning_rate")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.1),
+        }),
+        other => Err(McpError::InvalidArguments(format!(
+            "unknown forecast model: {other}"
+        ))),
     }
 }
 

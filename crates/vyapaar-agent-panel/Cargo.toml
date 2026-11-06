@@ -1,0 +1,14 @@
+[package]
+name = "vyapaar-agent-panel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Research-grade panel econometrics: fixed/random effects, Fama-MacBeth, IV/GMM, and factor asset-pricing tests"
+
+[dependencies]
+vyapaar-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+rust_decimal.workspace = true
+rust_decimal_macros.workspace = true

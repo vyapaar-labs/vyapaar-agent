@@ -1,0 +1,14 @@
+[package]
+name = "vyapaar-agent-forecast"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Time-series forecasting engines: gradient-boosted trees over lag/rolling features and classical statistical models (ARIMA/ETS/Theta/TBATS)"
+
+[dependencies]
+vyapaar-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+rust_decimal.workspace = true
+rust_decimal_macros.workspace = true

@@ -19,7 +19,7 @@ pub use frontier::{
 };
 pub use server::{McpServer, RpcError, RpcMessage};
 pub use tools::{
-    BacktestDispatcherService, DecisionExplainorService, IndicatorCatalogService,
+    BacktestDispatcherService, DecisionExplainorService, ForecastService, IndicatorCatalogService,
     MetricsCalculatorService, SpecValidatorService, StrategyOptimizerService,
     list_tool_definitions,
 };
