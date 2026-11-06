@@ -23,8 +23,8 @@
 ## 2. Coding Guidelines (DDD & TDD)
 * **Zero Floats Policy**: Decimals for price targets and stop limits.
 * **TDD & Parallel Test Directory Rule (MANDATORY)**:
-  - All tests must live in `tests/` parallel to `src/`.
-  - **STRICTLY FORBIDDEN**: In-file `#[test]` inside `src/`.
+  - All tests must live in `tests/` parallel to `src/`, or in a `src/tests/` module directory.
+  - **STRICTLY FORBIDDEN**: In-file `#[test]` inside production `src/` files.
   - Include deterministic prompt-replay regression tests.
 
 ---
