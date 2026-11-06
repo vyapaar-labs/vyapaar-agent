@@ -26,3 +26,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 anyhow = "1"
 thiserror = { version = "1" }
 tracing = { version = "0.1" }
+
+[[test]]
+name = "omniroute_integration"
+path = "tests/omniroute_integration.rs"
+required-features = ["llm"]

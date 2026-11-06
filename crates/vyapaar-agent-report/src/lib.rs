@@ -7,6 +7,13 @@
 
 use vyapaar_agent_analytics::PerformanceReport;
 
+/// Optional LLM narrative narration (enabled by the `llm` feature).
+#[cfg(feature = "llm")]
+pub mod narrate;
+
+#[cfg(feature = "llm")]
+pub use narrate::{NARRATE_SYSTEM_PROMPT, ReportLlmError, narrate_report};
+
 /// A named metric shown in the report header.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Metric {

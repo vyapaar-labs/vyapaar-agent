@@ -27,6 +27,13 @@ pub mod hypothesis;
 pub mod manifest;
 pub mod verification;
 
+/// LLM-backed research-loop helpers (enabled by the `llm` feature).
+#[cfg(feature = "llm")]
+pub mod llm;
+
+#[cfg(feature = "llm")]
+pub use llm::ResearchLlm;
+
 pub use backtest::{
     EquityMarkRecord, IndianStatutoryCostCalculator, LakehouseCatalog, LakehouseSlice,
     ParityBacktestOutcome, ParityBacktestRunner, TradeFillRecord,

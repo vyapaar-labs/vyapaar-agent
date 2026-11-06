@@ -3,9 +3,24 @@ name = "vyapaar-agent-report"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Embedded Typst / Markdown quantitative research tearsheet generator with optional LLM narrative narration"
+
+[features]
+default = []
+llm = ["dep:vyapaar-agent-llm"]
 
 [dependencies]
 vyapaar-core = { workspace = true }
 vyapaar-agent-analytics = { workspace = true }
+vyapaar-agent-llm = { path = "../vyapaar-agent-llm", optional = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+futures = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+
+[[test]]
+name = "omniroute_integration"
+path = "tests/omniroute_integration.rs"
+required-features = ["llm"]
