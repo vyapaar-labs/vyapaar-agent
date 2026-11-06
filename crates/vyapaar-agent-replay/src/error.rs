@@ -61,4 +61,8 @@ pub enum ReplayError {
     /// Decision parsing failed during replay
     #[error("Decision parsing failed: {0}")]
     DecisionParse(String),
+
+    /// A fixture or recorded decision was refused by the pre-trade risk gate.
+    #[error("risk gate refused: {0}")]
+    RiskRejected(String),
 }

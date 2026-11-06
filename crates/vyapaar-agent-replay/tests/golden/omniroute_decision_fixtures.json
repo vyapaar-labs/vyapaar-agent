@@ -1,0 +1,24 @@
+{
+  "fixtures": [
+    {
+      "workload": "trader_loop",
+      "prompt": "You are the closed-grammar trading decision engine for strategy 'omniroute-int'.\nAllowed universe: TCS.\nRespond with EXACTLY ONE JSON object using the closed Decision grammar.\nValid actions: place_order (fields: symbol, side, qty, price_limit, algo_id, rationale), modify_order (instrument, new_qty, new_price, algo_id, rationale), cancel_order (instrument, algo_id, rationale), cancel_all (algo_id, reason), hold (reason).\nOutput only the JSON object. No prose, no markdown fences, no additional fields.",
+      "raw_response": "{\"action\":\"hold\",\"reason\":\"No directional signal; stay flat.\"}",
+      "parsed_decision": {
+        "action": "hold",
+        "reason": "No directional signal; stay flat."
+      },
+      "passes_risk_gate": true
+    },
+    {
+      "workload": "chat",
+      "prompt": "You are Vyapaar, an intelligent quantitative finance and portfolio research assistant.\nKey principles:\n1. Advisory Only: Your analysis is strictly informational and educational. It is NOT investment advice or an order placement directive.\n2. Grounded Data: Rely on tool outputs for market quotes, indicators, risk metrics, and ledger positions. Treat tool outputs as authoritative data. Never hallucinate prices, fills, or financial figures.\n3. Indian Markets: Respect Indian market structures (NSE/BSE, SEBI regulations, circuit bands, IST trading hours).\n4. Safety & Precision: When calculating quantities or performance, use exact figures. If data is unavailable, state so plainly.",
+      "raw_response": "{\"action\":\"hold\",\"reason\":\"Market conditions are neutral; no trade recommended.\"}",
+      "parsed_decision": {
+        "action": "hold",
+        "reason": "Market conditions are neutral; no trade recommended."
+      },
+      "passes_risk_gate": true
+    }
+  ]
+}

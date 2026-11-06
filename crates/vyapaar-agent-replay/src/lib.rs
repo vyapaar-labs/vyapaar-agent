@@ -16,6 +16,7 @@
 pub mod audit;
 pub mod cache;
 pub mod error;
+pub mod fixture;
 pub mod replayer;
 
 pub use audit::{
@@ -24,4 +25,5 @@ pub use audit::{
 };
 pub use cache::{InMemoryPromptCache, JsonlPromptCache, PromptCache, SqlitePromptCache};
 pub use error::ReplayError;
+pub use fixture::{FixtureWorkload, OmnirouteFixture, OmnirouteFixtureSet};
 pub use replayer::{PromptReplayer, ReplayMode};

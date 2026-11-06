@@ -19,3 +19,4 @@ vyapaar-agent-prompt = { path = "../vyapaar-agent-prompt" }
 async-trait.workspace = true
 rust_decimal.workspace = true
 rust_decimal_macros.workspace = true
+vyapaar-agent-replay = { path = "../vyapaar-agent-replay" }
