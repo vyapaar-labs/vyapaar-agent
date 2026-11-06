@@ -72,7 +72,7 @@ impl Stream for SessionEvents {
 }
 
 /// Lightweight, cloneable handle to an active conversation session (§5.3).
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct SessionHandle {
     session_id: Option<SessionId>,
     cmd_tx: mpsc::Sender<SessionCommand>,
