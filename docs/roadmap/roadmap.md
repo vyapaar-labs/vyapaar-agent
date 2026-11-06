@@ -14,7 +14,7 @@
 
 ## Milestone 4: Conversational Assistant & Superset Capabilities (Design Doc 0001)
 
-### Phase A: Conversation Core & Actor Session Loop — [COMPLETED in `vyapaar-agent`]
+### Phase A: Conversation Core & Actor Session Loop — [COMPLETED across all repos]
 - [x] Storage ports in `vyapaar-agent-core::ports`: `SessionStore`, `MemoryStore`, `StoreError`, `SessionScope`, `RuntimeMode`.
 - [x] Shared tool contracts in `vyapaar-agent-core::tool`: `ToolSpec`, `ToolCall`, `ToolOutput`, `ToolError`.
 - [x] Prompt assembly in `vyapaar-agent-core::prompt`: `PromptAssembly` (`cached_prefix` vs `turn_context`), `Placement`, `PromptSection`, `default_assemble`.
@@ -28,9 +28,9 @@
   - [x] Headless runner (`run_turn_headless`) for unattended CLI execution.
   - [x] In-memory testing stores and unit tests.
   - [x] R1–R3 dependency rules integration test enforcing decoupling via `cargo metadata`.
-- [ ] Cross-repo Phase A:
-  - [ ] `vyapaar-runtime`: SQLite migrations (`agent_chat_session`, `agent_chat_message`) and `SessionStore` implementation in `vyapaar-runtime-persistence`.
-  - [ ] `vyapaar-ui`: Wire `vyapaar-cli ask` and `vyapaar-tui` AgentChat tab.
+- [x] Cross-repo Phase A:
+  - [x] `vyapaar-runtime`: SQLite & Postgres migrations (`agent_chat_session`, `agent_chat_message`) and `SqlxSessionStore` implementation in `vyapaar-runtime-persistence`.
+  - [x] `vyapaar-ui`: `vyapaar-highlight` lexer, `vyapaar-tui` AgentChat tab state machine, and `vyapaar-cli ask` headless runner.
 
 ### Phase B: Read-Only Tools (Planned)
 - [ ] Create `vyapaar-agent-chat-tools` crate.
