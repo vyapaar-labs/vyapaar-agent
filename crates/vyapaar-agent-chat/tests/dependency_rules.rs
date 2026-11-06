@@ -43,17 +43,21 @@ fn test_architectural_dependency_rules() {
                 "Violation of Rule R1: `{pkg_name}` cannot depend on `{dep_name}`"
             );
 
-            // Rule R2: vyapaar-agent-chat does not depend on vyapaar-agent-trader-loop
-            if pkg_name == "vyapaar-agent-chat" {
+            // Rule R2: vyapaar-agent-chat and vyapaar-agent-chat-tools do not depend on vyapaar-agent-trader-loop
+            if pkg_name == "vyapaar-agent-chat" || pkg_name == "vyapaar-agent-chat-tools" {
                 assert_ne!(
                     dep_name, "vyapaar-agent-trader-loop",
-                    "Violation of Rule R2: vyapaar-agent-chat cannot depend on vyapaar-agent-trader-loop"
+                    "Violation of Rule R2: {pkg_name} cannot depend on vyapaar-agent-trader-loop"
                 );
             }
             if pkg_name == "vyapaar-agent-trader-loop" {
                 assert_ne!(
                     dep_name, "vyapaar-agent-chat",
                     "Violation of Rule R2: vyapaar-agent-trader-loop cannot depend on vyapaar-agent-chat"
+                );
+                assert_ne!(
+                    dep_name, "vyapaar-agent-chat-tools",
+                    "Violation of Rule R2: vyapaar-agent-trader-loop cannot depend on vyapaar-agent-chat-tools"
                 );
             }
 
@@ -74,6 +78,14 @@ fn test_architectural_dependency_rules() {
                 assert_ne!(
                     dep_name, "sqlx",
                     "Rule R3 violation: vyapaar-agent-tools must stay pure"
+                );
+            }
+
+            // Rule R4: The only downward edge out of Tier 3A to vyapaar-ledger is vyapaar-agent-chat-tools
+            if dep_name.starts_with("vyapaar-ledger") {
+                assert_eq!(
+                    pkg_name, "vyapaar-agent-chat-tools",
+                    "Violation of Rule R4: only vyapaar-agent-chat-tools may depend on vyapaar-ledger, found `{pkg_name}`"
                 );
             }
         }

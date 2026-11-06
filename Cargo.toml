@@ -15,6 +15,7 @@ members = [
   "crates/vyapaar-agent-plugins",
   "crates/vyapaar-agent-report",
   "crates/vyapaar-agent-chat",
+  "crates/vyapaar-agent-chat-tools",
 ]
 
 [workspace.package]
@@ -40,9 +41,10 @@ vyapaar-agent-tools = { path = "crates/vyapaar-agent-tools" }
 vyapaar-agent-plugins = { path = "crates/vyapaar-agent-plugins" }
 vyapaar-agent-report = { path = "crates/vyapaar-agent-report" }
 vyapaar-agent-chat = { path = "crates/vyapaar-agent-chat" }
+vyapaar-agent-chat-tools = { path = "crates/vyapaar-agent-chat-tools" }
 vyapaar-core = { path = "../vyapaar-core" }
 vyapaar-risk = { path = "../vyapaar-risk" }
-vyapaar-ledger = { path = "../vyapaar-ledger" }
+vyapaar-ledger = { path = "../vyapaar-ledger/crates/vyapaar-ledger" }
 vyapaar-ledger-oms = { path = "../vyapaar-ledger/crates/vyapaar-ledger-oms" }
 vyapaar-ledger-portfolio = { path = "../vyapaar-ledger/crates/vyapaar-ledger-portfolio" }
 vyapaar-ledger-journal = { path = "../vyapaar-ledger/crates/vyapaar-ledger-journal" }

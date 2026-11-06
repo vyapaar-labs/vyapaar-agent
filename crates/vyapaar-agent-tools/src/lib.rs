@@ -5,6 +5,8 @@
 //! return structured [`ToolOutput`] payloads. Concrete data access (market
 //! feeds, portfolio stores) is injected by the caller, never reached into
 //! from inside a tool.
+//!
+//! Tools are also exposed to conversational chat through `vyapaar_agent_chat_tools::PureToolAdapter`.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

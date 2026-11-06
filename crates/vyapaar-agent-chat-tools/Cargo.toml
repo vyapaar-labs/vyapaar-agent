@@ -1,0 +1,32 @@
+[package]
+name = "vyapaar-agent-chat-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Conversational read-only chat tools and domain ports for vyapaar-agent"
+
+[lib]
+name = "vyapaar_agent_chat_tools"
+
+[dependencies]
+vyapaar-core = { workspace = true }
+vyapaar-ledger = { workspace = true }
+vyapaar-ledger-portfolio = { workspace = true }
+vyapaar-agent-core = { workspace = true }
+vyapaar-agent-chat = { workspace = true }
+vyapaar-agent-tools = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rust_decimal = { workspace = true }
+rust_decimal_macros = { workspace = true }
+chrono = { workspace = true }
+schemars = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "macros"] }
