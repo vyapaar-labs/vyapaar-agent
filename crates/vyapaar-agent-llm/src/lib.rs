@@ -22,9 +22,11 @@ use thiserror::Error;
 use vyapaar_agent_core::ToolSpec;
 use vyapaar_core::Decision;
 
+pub mod candle_gguf;
 pub mod config;
 pub mod openai_compat;
 
+pub use candle_gguf::{CandleGgufConfig, CandleGgufProvider, ENV_GGUF_PATH};
 pub use config::{LlmConfig, llm_config_from_env, llm_config_from_map, openai_provider_from_env};
 pub use openai_compat::{FreeTierPolicy, OpenAiCompatibleProvider, is_free_tier_model};
 

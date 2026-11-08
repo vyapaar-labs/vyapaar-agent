@@ -20,6 +20,10 @@ rust_decimal = { workspace = true }
 rust_decimal_macros = { workspace = true }
 reqwest = { workspace = true, features = ["stream"] }
 bytes = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt"] }
+candle-core = { workspace = true }
+candle-transformers = { workspace = true }
+shimmytok = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }
