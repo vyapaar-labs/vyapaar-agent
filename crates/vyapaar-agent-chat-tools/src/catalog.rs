@@ -61,3 +61,29 @@ pub fn register_read_only_tools(
     let tools = create_read_only_tools(portfolio, market, snapshots);
     registry.register_all(tools);
 }
+
+use crate::ports::strategy::StrategyRunner;
+use crate::strategy::{StrategyRunTool, StrategyTuneTool, TradeSuggestionTool};
+
+/// Bundle of the 3 strategy advisory tools (§6.4).
+pub fn create_strategy_tools(runner: Option<Arc<dyn StrategyRunner>>) -> Vec<Arc<dyn ChatTool>> {
+    if let Some(r) = runner {
+        vec![
+            Arc::new(StrategyRunTool::with_runner(Arc::clone(&r))),
+            Arc::new(StrategyTuneTool::with_runner(Arc::clone(&r))),
+            Arc::new(TradeSuggestionTool::with_runner(r)),
+        ]
+    } else {
+        vec![
+            Arc::new(StrategyRunTool::new()),
+            Arc::new(StrategyTuneTool::new()),
+            Arc::new(TradeSuggestionTool::new()),
+        ]
+    }
+}
+
+/// Register the 3 strategy execution and trade suggestion tools into a registry (§6.4).
+pub fn register_strategy_tools(registry: &mut ToolRegistry, runner: Option<Arc<dyn StrategyRunner>>) {
+    let tools = create_strategy_tools(runner);
+    registry.register_all(tools);
+}

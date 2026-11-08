@@ -15,3 +15,5 @@ pub use market::{
 };
 pub use portfolio::{AccountSummary, DateRange, OrderFilter, PortfolioReader};
 pub use snapshot::{SnapshotData, SnapshotNeeds, SnapshotSource};
+pub mod strategy;
+pub use strategy::{DefaultStrategyRunner, StrategyRunner};

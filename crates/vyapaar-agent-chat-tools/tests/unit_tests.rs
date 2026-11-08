@@ -633,3 +633,87 @@ async fn test_total_read_only_catalogue_count() {
         );
     }
 }
+
+#[tokio::test]
+async fn test_strategy_chat_tools_execution() {
+    use vyapaar_agent_chat_tools::catalog::{create_strategy_tools, register_strategy_tools};
+    use vyapaar_agent_chat_tools::strategy::{
+        StrategyRunTool, StrategyTuneTool, TradeSuggestionTool,
+    };
+
+    // 1. StrategyRunTool
+    let run_tool = StrategyRunTool::new();
+    assert_eq!(run_tool.spec().name, "strategy_run");
+    assert_eq!(run_tool.traits().risk, ToolRisk::ReadOnly);
+
+    let run_out = run_tool
+        .execute(
+            serde_json::json!({
+                "strategy": "turtle_breakout",
+                "symbol": "NSE:NIFTY50-INDEX",
+                "capital": "1000000"
+            }),
+            dummy_tool_context(),
+        )
+        .await
+        .expect("strategy_run should succeed");
+
+    assert!(run_out.ok);
+    assert_eq!(run_out.payload["strategy"], "turtle_breakout");
+    assert_eq!(run_out.payload["total_trades"], 12);
+    assert!(run_out.payload["net_pnl"].is_number() || run_out.payload["net_pnl"].is_string());
+
+    // 2. StrategyTuneTool
+    let tune_tool = StrategyTuneTool::new();
+    assert_eq!(tune_tool.spec().name, "strategy_tune");
+    assert_eq!(tune_tool.traits().risk, ToolRisk::ReadOnly);
+
+    let tune_out = tune_tool
+        .execute(
+            serde_json::json!({
+                "strategy": "turtle_breakout",
+                "symbol": "NSE:NIFTY50-INDEX",
+                "metric": "sharpe"
+            }),
+            dummy_tool_context(),
+        )
+        .await
+        .expect("strategy_tune should succeed");
+
+    assert!(tune_out.ok);
+    assert_eq!(tune_out.payload["strategy"], "turtle_breakout");
+    assert!(tune_out.payload["tuned_params"].is_object());
+    assert!(tune_out.payload["overfitting_verdict"].as_str().unwrap().contains("Overfitting Risk"));
+
+    // 3. TradeSuggestionTool
+    let sugg_tool = TradeSuggestionTool::new();
+    assert_eq!(sugg_tool.spec().name, "strategy_suggest");
+    assert_eq!(sugg_tool.traits().risk, ToolRisk::ReadOnly);
+
+    let sugg_out = sugg_tool
+        .execute(
+            serde_json::json!({
+                "strategy": "turtle_breakout",
+                "symbol": "NSE:NIFTY50-INDEX",
+                "risk_pct": "1.0"
+            }),
+            dummy_tool_context(),
+        )
+        .await
+        .expect("strategy_suggest should succeed");
+
+    assert!(sugg_out.ok);
+    assert_eq!(sugg_out.payload["signal"]["bias"], "BUY / LONG");
+    assert!(sugg_out.payload["sizing"]["quantity"].as_u64().unwrap() > 0);
+    assert!(sugg_out.payload["statutory_charges"]["total_charges"].is_number() || sugg_out.payload["statutory_charges"]["total_charges"].is_string());
+
+    // 4. Registration in ToolRegistry
+    let mut reg = ToolRegistry::new();
+    register_strategy_tools(&mut reg, None);
+    assert!(reg.get("strategy_run").is_some());
+    assert!(reg.get("strategy_tune").is_some());
+    assert!(reg.get("strategy_suggest").is_some());
+
+    let bundle = create_strategy_tools(None);
+    assert_eq!(bundle.len(), 3);
+}
