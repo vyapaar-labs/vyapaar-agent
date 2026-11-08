@@ -1,6 +1,6 @@
 //! In-process embedded Candle GGUF inference provider.
 //!
-//! Provides pure-Rust CPU/accelerated inference for GGUF models (e.g. SmolLM2, LLaMA)
+//! Provides pure-Rust CPU/accelerated inference for GGUF models (e.g. LLaMA-3.2, ZenFinance-3B, SmolLM2)
 //! using `candle-core`, `candle-transformers`, and `shimmytok`.
 
 use std::fs::File;
@@ -12,18 +12,18 @@ use candle_core::quantized::gguf_file;
 use candle_core::{Device, Tensor};
 use candle_transformers::generation::LogitsProcessor;
 use candle_transformers::models::quantized_llama::ModelWeights;
-use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use shimmytok::Tokenizer;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 
 use vyapaar_agent_core::decision::DecisionParser;
 use vyapaar_core::Decision;
 
 use crate::{
-    ChatMessage, ChatRequest, ChatRole, ChatStreamEvent, EventStream, LlmError,
-    LlmProvider, StopReason, Usage,
+    ChatMessage, ChatRequest, ChatRole, ChatStreamEvent, EventStream, LlmError, LlmProvider,
+    StopReason, Usage,
 };
 
 /// Environment variable for the default GGUF model path.
@@ -40,7 +40,7 @@ pub const ENV_GGUF_MAX_TOKENS: &str = "VYAPAAR_GGUF_MAX_TOKENS";
 pub struct CandleGgufConfig {
     /// Filesystem path to the `.gguf` model file.
     pub model_path: PathBuf,
-    /// Model name/identifier (e.g. "SmolLM2-360M-Instruct").
+    /// Model name/identifier (e.g. "Llama-3.2-3B-Instruct", "zenfinance-3b-Instruct", "SmolLM2-360M-Instruct").
     pub model_name: String,
     /// Sampling temperature (0.0 for deterministic greedy sampling).
     pub temperature: f64,
@@ -59,6 +59,18 @@ pub struct CandleGgufConfig {
 impl Default for CandleGgufConfig {
     fn default() -> Self {
         let candidates = [
+            "models/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+            "models/llama-3.2-3b-instruct-q4_k_m.gguf",
+            "../models/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+            "../models/llama-3.2-3b-instruct-q4_k_m.gguf",
+            "../../models/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+            "../../../models/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+            "models/zenfinance-3b-Instruct.Q4_K_M.gguf",
+            "models/zenfinance-3b-instruct.q4_k_m.gguf",
+            "../models/zenfinance-3b-Instruct.Q4_K_M.gguf",
+            "../models/zenfinance-3b-instruct.q4_k_m.gguf",
+            "../../models/zenfinance-3b-Instruct.Q4_K_M.gguf",
+            "../../../models/zenfinance-3b-Instruct.Q4_K_M.gguf",
             "models/SmolLM2-360M-Instruct-Q4_K_M.gguf",
             "models/smollm2-360m-instruct-q4_k_m.gguf",
             "../models/SmolLM2-360M-Instruct-Q4_K_M.gguf",
@@ -76,8 +88,25 @@ impl Default for CandleGgufConfig {
                         return p.to_path_buf();
                     }
                 }
-                PathBuf::from("models/SmolLM2-360M-Instruct-Q4_K_M.gguf")
+                PathBuf::from("models/Llama-3.2-3B-Instruct-Q4_K_M.gguf")
             });
+
+        let model_name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| {
+                let low = s.to_lowercase();
+                if low.contains("llama-3.2-3b") || low.contains("llama-3.2") {
+                    "Llama-3.2-3B-Instruct".to_string()
+                } else if low.contains("zenfinance") {
+                    "zenfinance-3b-Instruct".to_string()
+                } else if low.contains("smollm2") {
+                    "SmolLM2-360M-Instruct".to_string()
+                } else {
+                    s.to_string()
+                }
+            })
+            .unwrap_or_else(|| "Llama-3.2-3B-Instruct".to_string());
 
         let temperature = std::env::var(ENV_GGUF_TEMPERATURE)
             .ok()
@@ -91,7 +120,7 @@ impl Default for CandleGgufConfig {
 
         Self {
             model_path: path,
-            model_name: "SmolLM2-360M-Instruct".to_string(),
+            model_name,
             temperature,
             top_p: Some(0.9),
             repeat_penalty: 1.1,
@@ -105,8 +134,27 @@ impl Default for CandleGgufConfig {
 impl CandleGgufConfig {
     /// Create a config for a specific GGUF model file.
     pub fn new(model_path: impl Into<PathBuf>) -> Self {
+        let path = model_path.into();
+        let model_name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| {
+                let low = s.to_lowercase();
+                if low.contains("llama-3.2-3b") || low.contains("llama-3.2") {
+                    "Llama-3.2-3B-Instruct".to_string()
+                } else if low.contains("zenfinance") {
+                    "zenfinance-3b-Instruct".to_string()
+                } else if low.contains("smollm2") {
+                    "SmolLM2-360M-Instruct".to_string()
+                } else {
+                    s.to_string()
+                }
+            })
+            .unwrap_or_else(|| "Llama-3.2-3B-Instruct".to_string());
+
         Self {
-            model_path: model_path.into(),
+            model_path: path,
+            model_name,
             ..Default::default()
         }
     }
@@ -152,6 +200,18 @@ impl LoadedModel {
             }
             if found.is_none() {
                 let fallback_candidates = [
+                    "models/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+                    "models/llama-3.2-3b-instruct-q4_k_m.gguf",
+                    "../models/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+                    "../models/llama-3.2-3b-instruct-q4_k_m.gguf",
+                    "../../models/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+                    "../../../models/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+                    "models/zenfinance-3b-Instruct.Q4_K_M.gguf",
+                    "models/zenfinance-3b-instruct.q4_k_m.gguf",
+                    "../models/zenfinance-3b-Instruct.Q4_K_M.gguf",
+                    "../models/zenfinance-3b-instruct.q4_k_m.gguf",
+                    "../../models/zenfinance-3b-Instruct.Q4_K_M.gguf",
+                    "../../../models/zenfinance-3b-Instruct.Q4_K_M.gguf",
                     "models/SmolLM2-360M-Instruct-Q4_K_M.gguf",
                     "models/smollm2-360m-instruct-q4_k_m.gguf",
                     "../models/SmolLM2-360M-Instruct-Q4_K_M.gguf",
@@ -178,14 +238,21 @@ impl LoadedModel {
                 raw_path.display()
             )));
         }
+
         let path = &resolved;
 
         let mut file = File::open(path).map_err(|e| {
-            LlmError::Transport(format!("Failed to open GGUF file '{}': {e}", path.display()))
+            LlmError::Transport(format!(
+                "Failed to open GGUF file '{}': {e}",
+                path.display()
+            ))
         })?;
 
         let content = gguf_file::Content::read(&mut file).map_err(|e| {
-            LlmError::Transport(format!("Failed to read GGUF header '{}': {e}", path.display()))
+            LlmError::Transport(format!(
+                "Failed to read GGUF header '{}': {e}",
+                path.display()
+            ))
         })?;
 
         let device = Device::Cpu;
@@ -232,7 +299,7 @@ impl CandleGgufProvider {
         Self::new(CandleGgufConfig::new(path))
     }
 
-    /// Format chat messages into ChatML prompt string for SmolLM / LLaMA Instruct.
+    /// Format chat messages into prompt string.
     pub fn format_prompt(messages: &[ChatMessage], system_prompt: Option<&str>) -> String {
         let mut prompt = String::new();
         let default_sys = "You are Vyapaar, an intelligent quantitative finance and algorithmic trading assistant for Indian equities (NSE/BSE). You provide clear, insightful, disciplined financial and algorithmic trading analysis.";
@@ -276,9 +343,14 @@ impl LlmProvider for CandleGgufProvider {
     }
 
     async fn generate(&self, prompt: &str) -> Result<(String, Decision), LlmError> {
+        let decision_sys = "You are a trading decision engine. Emit ONLY a valid JSON decision matching one of these schema shapes:\n\
+            For placing orders:\n\
+            {\n  \"action\": \"place_order\",\n  \"symbol\": \"<TICKER>\",\n  \"side\": \"buy\" | \"sell\",\n  \"qty\": <positive integer>,\n  \"algo_id\": \"<UPPERCASE_ALGO_ID>\",\n  \"price_limit\": <optional limit price>,\n  \"rationale\": \"<reasoning>\"\n}\n\
+            For holding / no trade:\n\
+            {\n  \"action\": \"hold\",\n  \"reason\": \"<explanation>\"\n}";
         let chat_request = ChatRequest {
             messages: vec![ChatMessage::user(prompt)],
-            system_prompt: Some("You are a trading decision generator. Emit a JSON decision strictly matching the vyapaar schema.".to_string()),
+            system_prompt: Some(decision_sys.to_string()),
             tools: Vec::new(),
             temperature: Some(Decimal::ZERO),
             max_tokens: Some(512),
@@ -302,7 +374,7 @@ impl LlmProvider for CandleGgufProvider {
 
         let decision = DecisionParser::new()
             .parse_str(&full_text)
-            .map_err(|e| LlmError::ParsingFailed(e.to_string()))?;
+            .map_err(|e| LlmError::ParsingFailed(format!("err={e}, full_text={full_text:?}")))?;
 
         Ok((full_text, decision))
     }
@@ -331,25 +403,33 @@ impl LlmProvider for CandleGgufProvider {
                 let loaded = guard.as_mut().expect("loaded model present");
                 loaded.weights.clear_kv_cache();
 
-                let prompt_tokens = loaded.tokenizer.encode(&prompt, true).map_err(|e| {
-                    LlmError::Transport(format!("Tokenizer encode error: {e:?}"))
-                })?;
+                let prompt_tokens = loaded
+                    .tokenizer
+                    .encode(&prompt, true)
+                    .map_err(|e| LlmError::Transport(format!("Tokenizer encode error: {e:?}")))?;
 
                 if prompt_tokens.is_empty() {
-                    return Err(LlmError::Transport("Prompt encoded into empty token sequence".to_string()));
+                    return Err(LlmError::Transport(
+                        "Prompt encoded into empty token sequence".to_string(),
+                    ));
                 }
 
                 let input_tensor = Tensor::new(prompt_tokens.as_slice(), &loaded.device)
                     .and_then(|t| t.unsqueeze(0))
                     .map_err(|e| LlmError::Transport(format!("Tensor create error: {e}")))?;
 
-                let logits = loaded.weights.forward(&input_tensor, 0).map_err(|e| {
-                    LlmError::Transport(format!("Forward pass error: {e}"))
-                })?;
+                let logits = loaded
+                    .weights
+                    .forward(&input_tensor, 0)
+                    .map_err(|e| LlmError::Transport(format!("Forward pass error: {e}")))?;
 
                 let mut logits_processor = LogitsProcessor::new(
                     config.seed,
-                    if req_temp == 0.0 { None } else { Some(req_temp) },
+                    if req_temp == 0.0 {
+                        None
+                    } else {
+                        Some(req_temp)
+                    },
                     config.top_p,
                 );
 
@@ -371,44 +451,69 @@ impl LlmProvider for CandleGgufProvider {
                         break;
                     }
 
-                    let piece = loaded.tokenizer.decode_single(next_token, false).map_err(|e| {
-                        LlmError::Transport(format!("Decode token error: {e:?}"))
-                    })?;
+                    let piece = loaded
+                        .tokenizer
+                        .decode_single(next_token, false)
+                        .map_err(|e| LlmError::Transport(format!("Decode token error: {e:?}")))?;
 
-                    if piece == "<|im_end|>" || piece == "<|endoftext|>" || piece == "</s>" || piece.contains("<|im_end|>") {
+                    if piece == "<|im_end|>"
+                        || piece == "<|endoftext|>"
+                        || piece == "</s>"
+                        || piece == "<|eot_id|>"
+                        || piece == "<|end_of_text|>"
+                        || piece.contains("<|im_end|>")
+                        || piece.contains("<|eot_id|>")
+                    {
                         break;
                     }
-                    if piece == "<|im_start|>" || piece == "<|im_start|>assistant" {
+                    if piece == "<|im_start|>"
+                        || piece == "<|im_start|>assistant"
+                        || piece == "<|start_header_id|>"
+                        || piece == "<|start_header_id|>assistant<|end_header_id|>"
+                    {
                         continue;
                     }
 
                     generated_tokens.push(next_token);
                     generated_text.push_str(&piece);
 
-                    if generated_text.ends_with("<|im_end|>") || generated_text.ends_with("</s>") || generated_text.ends_with("<|endoftext|>") {
+                    if generated_text.contains("<|im_end|>")
+                        || generated_text.contains("<|eot_id|>")
+                        || generated_text.contains("<|end_of_text|>")
+                        || generated_text.contains("<|endoftext|>")
+                        || generated_text.ends_with("</s>")
+                    {
                         break;
                     }
 
-                    if tx.blocking_send(Ok(ChatStreamEvent::TextDelta { text: piece })).is_err() {
+                    if tx
+                        .blocking_send(Ok(ChatStreamEvent::TextDelta { text: piece }))
+                        .is_err()
+                    {
                         return Ok(());
                     }
 
                     let next_input = Tensor::new(&[next_token], &loaded.device)
                         .and_then(|t| t.unsqueeze(0))
-                        .map_err(|e| LlmError::Transport(format!("Next token tensor error: {e}")))?;
+                        .map_err(|e| {
+                            LlmError::Transport(format!("Next token tensor error: {e}"))
+                        })?;
 
-                    let next_logits = loaded.weights.forward(&next_input, seq_len + step).map_err(|e| {
-                        LlmError::Transport(format!("KV forward step error: {e}"))
-                    })?;
+                    let next_logits = loaded
+                        .weights
+                        .forward(&next_input, seq_len + step)
+                        .map_err(|e| LlmError::Transport(format!("KV forward step error: {e}")))?;
 
                     let sampled_logits = next_logits
                         .squeeze(0)
                         .and_then(|t| t.squeeze(0))
-                        .map_err(|e| LlmError::Transport(format!("KV logits squeeze error: {e}")))?;
+                        .map_err(|e| {
+                            LlmError::Transport(format!("KV logits squeeze error: {e}"))
+                        })?;
 
-                    next_token = logits_processor
-                        .sample(&sampled_logits)
-                        .map_err(|e| LlmError::Transport(format!("Autoregressive sample error: {e}")))?;
+                    next_token = logits_processor.sample(&sampled_logits).map_err(|e| {
+                        LlmError::Transport(format!("Autoregressive sample error: {e}"))
+                    })?;
                 }
 
                 let usage = Usage {
@@ -422,6 +527,10 @@ impl LlmProvider for CandleGgufProvider {
                 let clean_text = generated_text
                     .replace("<|im_end|>", "")
                     .replace("<|im_start|>", "")
+                    .replace("<|eot_id|>", "")
+                    .replace("<|start_header_id|>", "")
+                    .replace("<|end_header_id|>", "")
+                    .replace("<|end_of_text|>", "")
                     .trim()
                     .to_string();
                 let _ = tx.blocking_send(Ok(ChatStreamEvent::MessageEnd {

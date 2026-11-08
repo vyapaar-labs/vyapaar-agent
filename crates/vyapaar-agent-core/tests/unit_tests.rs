@@ -59,6 +59,26 @@ fn test_closed_decision_parser_success_and_markdown() {
 }
 
 #[test]
+fn test_closed_decision_parser_normalizes_case() {
+    let parser = DecisionParser::new();
+    let json_text = r#"{
+        "action": "place_order",
+        "symbol": "TCS",
+        "side": "buy",
+        "qty": "20",
+        "algo_id": "SEBI_01"
+    }"#;
+    let dec = parser.parse_str(json_text).expect("Should parse lowercase side");
+    match dec {
+        Decision::PlaceOrder { side, symbol, .. } => {
+            assert_eq!(side, OrderSide::Buy);
+            assert_eq!(symbol, "TCS");
+        }
+        _ => panic!("Expected PlaceOrder"),
+    }
+}
+
+#[test]
 fn test_closed_decision_rejects_unknown_fields() {
     let parser = DecisionParser::new();
 

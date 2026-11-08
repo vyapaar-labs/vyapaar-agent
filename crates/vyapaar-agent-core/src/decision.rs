@@ -86,6 +86,61 @@ impl DecisionParser {
     /// will result in an immediate [`DecisionError::UnknownField`] or [`DecisionError::Json`].
     pub fn parse_str(&self, raw: &str) -> Result<Decision, DecisionError> {
         let cleaned = extract_json_payload(raw);
+        if let Ok(decision) = serde_json::from_str::<Decision>(cleaned) {
+            return Ok(decision);
+        }
+
+        if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(cleaned) {
+            let mut modified = false;
+            if let Some(side_val) = val.get_mut("side") {
+                if let Some(s) = side_val.as_str() {
+                    let upper = s.to_uppercase();
+                    if upper != s {
+                        *side_val = serde_json::Value::String(upper);
+                        modified = true;
+                    }
+                }
+            }
+            if let Some(action_val) = val.get_mut("action") {
+                if let Some(a) = action_val.as_str() {
+                    let lower = a.to_lowercase();
+                    if lower != a {
+                        *action_val = serde_json::Value::String(lower);
+                        modified = true;
+                    }
+                }
+            }
+            if let Some(qty_val) = val.get_mut("qty") {
+                if qty_val.is_number() {
+                    *qty_val = serde_json::Value::String(qty_val.to_string());
+                    modified = true;
+                }
+            }
+            if let Some(price_val) = val.get_mut("price_limit") {
+                if price_val.is_number() {
+                    *price_val = serde_json::Value::String(price_val.to_string());
+                    modified = true;
+                }
+            }
+            if let Some(new_qty_val) = val.get_mut("new_qty") {
+                if new_qty_val.is_number() {
+                    *new_qty_val = serde_json::Value::String(new_qty_val.to_string());
+                    modified = true;
+                }
+            }
+            if let Some(new_price_val) = val.get_mut("new_price") {
+                if new_price_val.is_number() {
+                    *new_price_val = serde_json::Value::String(new_price_val.to_string());
+                    modified = true;
+                }
+            }
+            if modified {
+                if let Ok(dec) = serde_json::from_value::<Decision>(val) {
+                    return Ok(dec);
+                }
+            }
+        }
+
         let decision: Decision = serde_json::from_str(cleaned).map_err(|e| {
             let msg = e.to_string();
             if msg.contains("unknown field") {
@@ -98,7 +153,6 @@ impl DecisionParser {
         Ok(decision)
     }
 
-    /// Validate SEBI algo ID according to configured format rules.
     pub fn validate_algo_id(&self, algo_id: &str) -> Result<(), DecisionError> {
         let trimmed = algo_id.trim();
         if trimmed.is_empty() {
@@ -264,22 +318,51 @@ impl DecisionParser {
 /// Helper to strip markdown JSON fences: ```json ... ``` or extract outer `{ ... }`.
 pub fn extract_json_payload(raw: &str) -> &str {
     let s = raw.trim();
-    if let Some(stripped) = s.strip_prefix("```json") {
-        if let Some(end) = stripped.rfind("```") {
-            return stripped[..end].trim();
+    let text = if let Some(stripped) = s.strip_prefix("```json") {
+        if let Some(end) = stripped.find("```") {
+            stripped[..end].trim()
+        } else {
+            stripped.trim()
         }
     } else if let Some(stripped) = s.strip_prefix("```") {
-        if let Some(end) = stripped.rfind("```") {
-            return stripped[..end].trim();
+        if let Some(end) = stripped.find("```") {
+            stripped[..end].trim()
+        } else {
+            stripped.trim()
+        }
+    } else {
+        s
+    };
+
+    // Extract first balanced { ... } object if present
+    if let Some(start) = text.find("{") {
+        let mut depth = 0;
+        let mut in_str = false;
+        let mut escape = false;
+        for (idx, ch) in text[start..].char_indices() {
+            if escape {
+                escape = false;
+                continue;
+            }
+            match ch {
+                '\\' if in_str => escape = true,
+                '"' => in_str = !in_str,
+                '{' if !in_str => depth += 1,
+                '}' if !in_str => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return &text[start..=start + idx];
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(end) = text.rfind("}") {
+            if start <= end {
+                return &text[start..=end];
+            }
         }
     }
 
-    // If there is surrounding text outside the JSON object, extract between first '{' and last '}'
-    if let (Some(start), Some(end)) = (s.find('{'), s.rfind('}')) {
-        if start <= end {
-            return &s[start..=end];
-        }
-    }
-
-    s
+    text
 }
