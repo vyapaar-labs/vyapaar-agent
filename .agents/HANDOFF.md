@@ -8,6 +8,7 @@
 - **Plan 0002** (job scheduler, memory engine, strategy verification, session checkpoints): commits `d27da44` + `ec54849` + `58255fb`. Merged in `5ac0919`.
 - **Plan 0004 Phase 4** (local SLM determinism hardening, plan 0005 §4): commit `b703a59`. Merged in `5ac0919`.
 - **Plan 0005** (reference material): finalized in `c5557fa`. Merged in `5ac0919`.
+- **Plan 0004** (Free-Tier Multi-Provider LLM Backend): fully implemented through Phase 3 — `OpenAiCompatibleProvider`, `FreeTierPolicy`, `LlmAuditRecord.provider`, env-var config, `TraderLoop::run()`, all four workloads injected, golden fixtures, per-repo `#[ignore]`d integration tests. Phase 4 (local SLM) deferred by design. Marked implemented in `docs/plans/README.md`; plan doc removed. Commit `e6b9b76` (this branch).
 
 ## Decisions & Discoveries (final)
 
