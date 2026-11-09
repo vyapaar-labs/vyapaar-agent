@@ -1,4 +1,7 @@
-//! Session actor, command handles, and asynchronous event streams.
+//! Session actor, command handles, asynchronous event streams, and turn
+//! checkpointing (§2.4 of plan 0002).
+
+pub mod checkpoint;
 
 use std::collections::HashSet;
 use std::pin::Pin;

@@ -12,10 +12,16 @@
 //! - Verified mathematical [`IndicatorCatalog`] preventing hallucinations.
 //! - Deterministic prompt hashing, structured section assembly, and template rendering.
 //! - Persistence ports (`SessionStore`, `MemoryStore`) decoupled from concrete runtimes.
+//! - Autonomous scheduled job engine (`jobs`) with cron evaluation, multi-dimensional
+//!   budget enforcement, and an explicit human approval gate.
+//! - Local financial memory engine (`memory`) layered over the `MemoryStore` port.
+//!   (implementation in `src/memory/`)
 
 pub mod decision;
 pub mod error;
 pub mod indicators;
+pub mod jobs;
+pub mod memory;
 pub mod ports;
 pub mod prompt;
 pub mod ref_store;
@@ -30,6 +36,7 @@ pub use indicators::{
     IndicatorCatalog, IndicatorCategory, IndicatorInvocation, IndicatorSpec, ParameterSpec,
     StrategySpec, validate_spec_indicators,
 };
+pub use memory::{MemoryCategory, MemoryEngine, MemoryFact};
 pub use ports::{
     MemoryEntry, MemoryId, MemoryKind, MemoryOrigin, MemoryProfile, MemoryQuery, MemoryStore,
     MessageSeq, NewMemory, NewSession, PersistedMessage, ProfileBudget, RuntimeMode, SaveOutcome,

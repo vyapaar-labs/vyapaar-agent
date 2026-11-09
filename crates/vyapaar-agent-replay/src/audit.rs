@@ -3,6 +3,10 @@
 //! Provides SEBI regulatory compliance by maintaining an immutable, tamper-evident
 //! SHA-256 hash chain linking sequential LLM inference turns.
 
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
+
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use schemars::JsonSchema;
@@ -15,18 +19,42 @@ use crate::error::ReplayError;
 
 /// Append-only audit record schema for an LLM query and response turn.
 ///
-/// Implements exact field requirements from Master Plan §2.1.
+/// Implements exact field requirements from Master Plan §2.1 plus the Phase-4
+/// determinism fingerprint (plan 0005 §4): when a local engine replaces the
+/// free-tier router, the audit record must capture the serving-stack fingerprint
+/// so `prompt + seed + temperature = 0` is actually reproducible.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LlmAuditRecord {
     /// UTC timestamp of inference
     pub timestamp_utc: DateTime<Utc>,
-    /// Model identifier name (e.g. "claude-3-5-sonnet", "gemini-1.5-pro")
+    /// Model identifier name (e.g. "claude-3-5-sonnet", "gemini-1.5-pro",
+    /// "Llama-3.2-3B-Instruct")
     pub model: String,
     /// Provider / endpoint that served the call (e.g. "omniroute",
-    /// "openai", "ollama"). Part of the hash chain so a multi-provider router
-    /// that varies the backend per call is captured in the audit trail.
+    /// "openai", "ollama", "candle-gguf"). Part of the hash chain so a
+    /// multi-provider router that varies the backend per call is captured in
+    /// the audit trail.
     #[serde(default)]
     pub provider: String,
+    /// Serving engine identifier (e.g. "candle-gguf", "openai-compat").
+    /// Empty for backends that do not expose a discrete engine.
+    #[serde(default)]
+    pub engine: String,
+    /// Serving engine version (e.g. candle-core "0.11.1"). Empty when unknown.
+    #[serde(default)]
+    pub engine_version: String,
+    /// SHA-256 of the exact model file served (e.g. the .gguf file), when the
+    /// backend loads a file. Captured instead of — or in addition to — the
+    /// model name tag, because a name alone does not pin the weights.
+    pub model_file_sha256: Option<[u8; 32]>,
+    /// Quantization build of the served model file (e.g. "Q4_K_M"), when known.
+    #[serde(default)]
+    pub quantization: Option<String>,
+    /// CPU thread count used for inference, when pinned for determinism.
+    pub thread_count: Option<u32>,
+    /// Hardware identity string for the inference device (e.g. CPU model).
+    #[serde(default)]
+    pub hardware: Option<String>,
     /// Sampling temperature (exact Decimal, zero floats)
     pub temperature: Decimal,
     /// Random seed for deterministic inference
@@ -45,6 +73,11 @@ pub struct LlmAuditRecord {
 
 impl LlmAuditRecord {
     /// Construct a new audit record, automatically computing the SHA-256 hash of raw_prompt.
+    ///
+    /// Determinism fingerprint fields (`engine`, `engine_version`,
+    /// `model_file_sha256`, `quantization`, `thread_count`, `hardware`) are left
+    /// unset; attach them with the [`LlmAuditRecord::with_engine`]/`with_*` builders
+    /// when a local engine is the backend of record.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         timestamp_utc: DateTime<Utc>,
@@ -63,6 +96,12 @@ impl LlmAuditRecord {
             timestamp_utc,
             model: model.into(),
             provider: String::new(),
+            engine: String::new(),
+            engine_version: String::new(),
+            model_file_sha256: None,
+            quantization: None,
+            thread_count: None,
+            hardware: None,
             temperature,
             seed,
             prompt_sha256,
@@ -76,6 +115,42 @@ impl LlmAuditRecord {
     /// Attach the provider/endpoint identifier that served this call.
     pub fn with_provider(mut self, provider: impl Into<String>) -> Self {
         self.provider = provider.into();
+        self
+    }
+
+    /// Attach the serving engine identifier (e.g. "candle-gguf").
+    pub fn with_engine(mut self, engine: impl Into<String>) -> Self {
+        self.engine = engine.into();
+        self
+    }
+
+    /// Attach the serving engine version (e.g. candle-core "0.11.1").
+    pub fn with_engine_version(mut self, version: impl Into<String>) -> Self {
+        self.engine_version = version.into();
+        self
+    }
+
+    /// Attach the SHA-256 of the exact model file served.
+    pub fn with_model_file_hash(mut self, hash: [u8; 32]) -> Self {
+        self.model_file_sha256 = Some(hash);
+        self
+    }
+
+    /// Attach the quantization build of the served model file (e.g. "Q4_K_M").
+    pub fn with_quantization(mut self, quantization: impl Into<String>) -> Self {
+        self.quantization = Some(quantization.into());
+        self
+    }
+
+    /// Attach the CPU thread count pinned for deterministic inference.
+    pub fn with_thread_count(mut self, threads: u32) -> Self {
+        self.thread_count = Some(threads);
+        self
+    }
+
+    /// Attach a hardware identity string for the inference device.
+    pub fn with_hardware(mut self, hardware: impl Into<String>) -> Self {
+        self.hardware = Some(hardware.into());
         self
     }
 
@@ -96,6 +171,39 @@ impl LlmAuditRecord {
         }
         Ok(())
     }
+}
+
+/// SHA-256 digest of a file's contents, used to pin the exact model file
+/// (e.g. a `.gguf`) served by a local engine in the audit fingerprint.
+///
+/// Reads the file in 64 KiB chunks so large model files do not need to be
+/// held entirely in memory.
+pub fn hash_file(path: impl AsRef<Path>) -> Result<[u8; 32], ReplayError> {
+    let path = path.as_ref();
+    let mut file = File::open(path).map_err(|e| {
+        ReplayError::Io(format!(
+            "failed to open model file '{}': {e}",
+            path.display()
+        ))
+    })?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf).map_err(|e| {
+            ReplayError::Io(format!(
+                "failed to read model file '{}': {e}",
+                path.display()
+            ))
+        })?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let result = hasher.finalize();
+    let mut arr = [0u8; 32];
+    arr.copy_from_slice(&result);
+    Ok(arr)
 }
 
 /// Cryptographically chained audit record linking sequential records via SHA-256.
@@ -135,6 +243,22 @@ pub fn compute_record_hash(prev_hash: &[u8; 32], seq: u64, record: &LlmAuditReco
     }
     hasher.update(record.model.as_bytes());
     hasher.update(record.provider.as_bytes());
+    // Phase-4 determinism fingerprint: two records that differ only in serving
+    // stack must hash differently so the chain pins the exact engine/weights.
+    hasher.update(record.engine.as_bytes());
+    hasher.update(record.engine_version.as_bytes());
+    if let Some(h) = record.model_file_sha256 {
+        hasher.update(&h);
+    }
+    if let Some(q) = &record.quantization {
+        hasher.update(q.as_bytes());
+    }
+    if let Some(t) = record.thread_count {
+        hasher.update(&t.to_be_bytes());
+    }
+    if let Some(hw) = &record.hardware {
+        hasher.update(hw.as_bytes());
+    }
     hasher.update(record.temperature.to_string().as_bytes());
     hasher.update(&record.seed.to_be_bytes());
     hasher.update(&record.prompt_sha256);

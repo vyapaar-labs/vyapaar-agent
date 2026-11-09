@@ -327,18 +327,19 @@ impl SqlitePromptCache {
                 let parsed_decision: Decision = serde_json::from_str(&decision_json)
                     .map_err(|e| ReplayError::Json(e.to_string()))?;
 
-                let record = LlmAuditRecord {
+                // Fingerprint fields (engine/model hash/threads) are not stored
+                // in prompt_cache; they default to unset and can be attached via
+                // the with_* builders when a local engine is the backend of record.
+                let record = LlmAuditRecord::new(
                     timestamp_utc,
                     model,
-                    provider: String::new(),
                     temperature,
-                    seed: seed_i64 as u64,
-                    prompt_sha256: *prompt_hash,
+                    seed_i64 as u64,
                     market_context_json,
                     raw_prompt,
                     raw_response,
                     parsed_decision,
-                };
+                );
 
                 Ok(Some(record))
             }
@@ -368,7 +369,6 @@ impl SqlitePromptCache {
             let seq: i64 = row.get(0);
             let prev_bytes: Vec<u8> = row.get(1);
             let rec_bytes: Vec<u8> = row.get(2);
-            let prompt_bytes: Vec<u8> = row.get(3);
             let ts_str: String = row.get(4);
             let timestamp_utc = DateTime::parse_from_rfc3339(&ts_str)
                 .map_err(|e| ReplayError::Database(e.to_string()))?
@@ -392,21 +392,18 @@ impl SqlitePromptCache {
             let mut record_hash = [0u8; 32];
             record_hash.copy_from_slice(&rec_bytes);
 
-            let mut prompt_sha256 = [0u8; 32];
-            prompt_sha256.copy_from_slice(&prompt_bytes);
-
-            let record = LlmAuditRecord {
+            // Fingerprint fields default to unset here (not stored in cache);
+            // attach via with_* builders when a local engine is the backend.
+            let record = LlmAuditRecord::new(
                 timestamp_utc,
                 model,
-                provider: String::new(),
                 temperature,
-                seed: seed as u64,
-                prompt_sha256,
+                seed as u64,
                 market_context_json,
                 raw_prompt,
                 raw_response,
                 parsed_decision,
-            };
+            );
 
             result.push(ChainedLlmAuditRecord {
                 sequence_number: seq as u64,

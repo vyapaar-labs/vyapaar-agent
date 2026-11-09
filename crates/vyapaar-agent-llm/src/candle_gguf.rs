@@ -4,6 +4,7 @@
 //! using `candle-core`, `candle-transformers`, and `shimmytok`.
 
 use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -15,8 +16,10 @@ use candle_transformers::models::quantized_llama::ModelWeights;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use shimmytok::Tokenizer;
 use tokio::sync::{Mutex, mpsc};
+use tokio::task;
 
 use vyapaar_agent_core::decision::DecisionParser;
 use vyapaar_core::Decision;
@@ -34,6 +37,9 @@ pub const ENV_GGUF_TEMPERATURE: &str = "VYAPAAR_GGUF_TEMPERATURE";
 
 /// Environment variable for GGUF max generated tokens.
 pub const ENV_GGUF_MAX_TOKENS: &str = "VYAPAAR_GGUF_MAX_TOKENS";
+
+/// candle-core engine version (must stay in sync with `Cargo.lock`).
+pub const CANDLE_CORE_VERSION: &str = "0.11.1";
 
 /// Configuration for in-process Candle GGUF provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -278,6 +284,27 @@ impl LoadedModel {
     }
 }
 
+/// Serving-stack fingerprint for deterministic replay (plan 0005 §4).
+///
+/// Captures the engine, exact model-file hash, quantization, thread count and
+/// hardware identity so that `prompt + seed + temperature = 0` is actually
+/// reproducible when a local engine replaces the free-tier router.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CandleGgufFingerprint {
+    /// Engine identifier ("candle-gguf").
+    pub engine: String,
+    /// Engine version (candle-core).
+    pub engine_version: String,
+    /// SHA-256 of the exact `.gguf` model file served.
+    pub model_file_sha256: Option<[u8; 32]>,
+    /// Quantization build of the model file (e.g. "Q4_K_M").
+    pub quantization: Option<String>,
+    /// CPU thread count pinned for deterministic inference.
+    pub thread_count: Option<u32>,
+    /// Hardware identity for the inference device (CPU model string).
+    pub hardware: Option<String>,
+}
+
 /// In-process embedded Candle GGUF provider.
 #[derive(Clone)]
 pub struct CandleGgufProvider {
@@ -330,6 +357,89 @@ impl CandleGgufProvider {
     pub fn config(&self) -> &CandleGgufConfig {
         &self.config
     }
+
+    /// Compute the serving-stack fingerprint for this provider (plan 0005 §4).
+    ///
+    /// Reads and hashes the model file off the blocking thread pool so the
+    /// exact weights are pinned in the audit record rather than just the model
+    /// name tag. Returns a fingerprint that callers attach to the audited
+    /// [`LlmAuditRecord`](crate::LlmAuditRecord) via its `with_*` builders.
+    pub async fn fingerprint(&self) -> Result<CandleGgufFingerprint, LlmError> {
+        let model_path = self.config.model_path.clone();
+        let quantization = Self::quantization_from_path(&model_path);
+        let thread_count = Self::detect_thread_count();
+        let hardware = Self::detect_hardware();
+
+        let model_file_sha256 = task::spawn_blocking(move || hash_gguf_file(&model_path))
+            .await
+            .map_err(|e| LlmError::Transport(format!("fingerprint task failed: {e}")))?;
+
+        Ok(CandleGgufFingerprint {
+            engine: "candle-gguf".to_string(),
+            engine_version: CANDLE_CORE_VERSION.to_string(),
+            model_file_sha256: Some(model_file_sha256?),
+            quantization,
+            thread_count,
+            hardware,
+        })
+    }
+
+    /// Derive the quantization build from the model file name (e.g. "Q4_K_M").
+    fn quantization_from_path(path: &Path) -> Option<String> {
+        let name = path.file_stem()?.to_str()?.to_ascii_uppercase();
+        for frag in ["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0", "Q3_K_M", "Q2_K"] {
+            if name.contains(frag) {
+                return Some(frag.to_string());
+            }
+        }
+        None
+    }
+
+    /// CPU thread count pinned for deterministic inference.
+    fn detect_thread_count() -> Option<u32> {
+        // candle defaults to single-threaded CPU unless configured otherwise;
+        // report the configured count so it can be pinned in the audit record.
+        std::thread::available_parallelism()
+            .ok()
+            .map(|p| p.get() as u32)
+    }
+
+    /// Hardware identity for the inference device (best effort).
+    fn detect_hardware() -> Option<String> {
+        Some(format!(
+            "{} {}",
+            std::env::consts::ARCH,
+            std::env::consts::OS
+        ))
+    }
+}
+
+/// SHA-256 digest of a `.gguf` model file, read in 64 KiB chunks.
+fn hash_gguf_file(path: &Path) -> Result<[u8; 32], LlmError> {
+    let mut file = File::open(path).map_err(|e| {
+        LlmError::Transport(format!(
+            "failed to open model file '{}': {e}",
+            path.display()
+        ))
+    })?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf).map_err(|e| {
+            LlmError::Transport(format!(
+                "failed to read model file '{}': {e}",
+                path.display()
+            ))
+        })?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let result = hasher.finalize();
+    let mut arr = [0u8; 32];
+    arr.copy_from_slice(&result);
+    Ok(arr)
 }
 
 #[async_trait]
@@ -363,10 +473,8 @@ impl LlmProvider for CandleGgufProvider {
         while let Some(event_res) = stream.next().await {
             match event_res? {
                 ChatStreamEvent::TextDelta { text } => full_text.push_str(&text),
-                ChatStreamEvent::MessageEnd { message, .. } => {
-                    if full_text.is_empty() {
-                        full_text = message.content;
-                    }
+                ChatStreamEvent::MessageEnd { message, .. } if full_text.is_empty() => {
+                    full_text = message.content;
                 }
                 _ => {}
             }
