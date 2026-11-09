@@ -18,6 +18,7 @@ pub mod error;
 pub mod indicators;
 pub mod ports;
 pub mod prompt;
+pub mod ref_store;
 pub mod result;
 pub mod tool;
 
@@ -39,5 +40,6 @@ pub use prompt::{
     DefaultPromptBuilder, Placement, PromptAssembly, PromptBuilder, PromptHash, PromptSection,
     PromptTemplate, compute_prompt_hash, default_assemble, hash_prompt_hex, sha256_hex,
 };
+pub use ref_store::{DataReferenceStore, RefEntry};
 pub use result::{DisplayBlock, ExecutionMeta, MetricItem, ResultStatus, VyapaarResultEnvelope};
 pub use tool::{ToolCall, ToolError, ToolOutput, ToolSpec};

@@ -85,9 +85,8 @@ async fn test_tool_get_indicator_catalog() {
         assert!(error.is_none());
         let res = result.unwrap();
         let structured = &res["structuredContent"];
-        let indicators = structured["indicators"]
-            .as_array()
-            .expect("indicators array");
+        let data = &structured["data"];
+        let indicators = data["indicators"].as_array().expect("indicators array");
         assert!(indicators.len() >= 10);
 
         let names: Vec<&str> = indicators
@@ -146,7 +145,9 @@ async fn test_tool_check_spec_valid_and_invalid() {
     if let RpcMessage::Response { result, error, .. } = resp {
         assert!(error.is_none());
         let res = result.unwrap();
-        assert_eq!(res["structuredContent"]["status"], "valid");
+        let structured = &res["structuredContent"];
+        let data = &structured["data"];
+        assert_eq!(data["status"], "valid");
     } else {
         panic!("unexpected response type");
     }
@@ -217,11 +218,12 @@ async fn test_tool_run_backtest() {
         assert!(error.is_none());
         let res = result.unwrap();
         let structured = &res["structuredContent"];
-        assert_eq!(structured["status"], "queued");
-        assert_eq!(structured["strategy_name"], "NIFTY_TREND_V1");
-        assert_eq!(structured["statutory_costs_enforced"], true);
-        assert_eq!(structured["settlement_timing"], "T+1");
-        assert!(structured["backtest_id"].is_string());
+        let data = &structured["data"];
+        assert_eq!(data["status"], "queued");
+        assert_eq!(data["strategy_name"], "NIFTY_TREND_V1");
+        assert_eq!(data["statutory_costs_enforced"], true);
+        assert_eq!(data["settlement_timing"], "T+1");
+        assert!(data["backtest_id"].is_string());
     } else {
         panic!("unexpected response type");
     }
@@ -259,13 +261,14 @@ async fn test_tool_evaluate_metrics() {
         assert!(error.is_none());
         let res = result.unwrap();
         let structured = &res["structuredContent"];
-        assert_eq!(structured["total_trades"], 4);
-        assert_eq!(structured["win_rate"], 75.0);
-        assert!(structured["sharpe"].as_f64().is_some());
-        assert!(structured["sortino"].as_f64().is_some());
-        assert!(structured["max_drawdown"].as_f64().is_some());
-        assert!(structured["dsr"].as_f64().is_some());
-        assert!(structured["pbo"].as_f64().is_some());
+        let data = &structured["data"];
+        assert_eq!(data["total_trades"], 4);
+        assert_eq!(data["win_rate"], 75.0);
+        assert!(data["sharpe"].as_f64().is_some());
+        assert!(data["sortino"].as_f64().is_some());
+        assert!(data["max_drawdown"].as_f64().is_some());
+        assert!(data["dsr"].as_f64().is_some());
+        assert!(data["pbo"].as_f64().is_some());
     } else {
         panic!("unexpected response type");
     }
@@ -295,11 +298,12 @@ async fn test_tool_optimize_strategy() {
         assert!(error.is_none());
         let res = result.unwrap();
         let structured = &res["structuredContent"];
-        assert_eq!(structured["status"], "started");
-        assert_eq!(structured["algorithm"], "genetic");
-        assert_eq!(structured["total_trials"], 50);
+        let data = &structured["data"];
+        assert_eq!(data["status"], "started");
+        assert_eq!(data["algorithm"], "genetic");
+        assert_eq!(data["total_trials"], 50);
         assert!(
-            structured["job_id"]
+            data["job_id"]
                 .as_str()
                 .unwrap()
                 .contains("sweep_genetic_50_99")
@@ -343,10 +347,11 @@ async fn test_tool_explain_decision() {
         assert!(error.is_none());
         let res = result.unwrap();
         let structured = &res["structuredContent"];
-        assert_eq!(structured["sebi_algo_id"], "SEBI_ALGO_HDFC_001");
-        assert_eq!(structured["passed_pre_trade_risk"], true);
+        let data = &structured["data"];
+        assert_eq!(data["sebi_algo_id"], "SEBI_ALGO_HDFC_001");
+        assert_eq!(data["passed_pre_trade_risk"], true);
         assert!(
-            structured["explanation"]
+            data["explanation"]
                 .as_str()
                 .unwrap()
                 .contains("HDFCBANK.NSE")
@@ -575,5 +580,190 @@ fn test_golden_mcp_tools_schema_conformance() {
         assert!(!name.is_empty());
         assert!(!desc.is_empty());
         assert_eq!(tool["inputSchema"]["type"], "object");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Gateway Discovery Protocol tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_gateway_search_tools() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(100),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_search_tools",
+            "arguments": {
+                "query": "backtest",
+                "category": "all"
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none(), "expected no error, got: {:?}", error);
+        let res = result.unwrap();
+        let structured = &res["structuredContent"];
+        assert_eq!(structured["schema"], "vyapaar/result/v1");
+        assert_eq!(structured["status"], "ok");
+        let data = &structured["data"];
+        assert_eq!(data["query"], "backtest");
+        assert_eq!(data["category"], "all");
+        assert!(data["count"].as_u64().unwrap() >= 1);
+        let tools = data["tools"].as_array().expect("tools array");
+        assert!(
+            tools
+                .iter()
+                .any(|t| t["name"].as_str().unwrap().contains("backtest"))
+        );
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_gateway_search_tools_filters_by_category() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(101),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_search_tools",
+            "arguments": {
+                "query": "forecast",
+                "category": "forecast"
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none());
+        let res = result.unwrap();
+        let data = &res["structuredContent"]["data"];
+        assert_eq!(data["category"], "forecast");
+        let tools = data["tools"].as_array().expect("tools array");
+        assert!(
+            tools
+                .iter()
+                .any(|t| t["category"].as_str() == Some("forecast"))
+        );
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_gateway_describe_tool() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(102),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_describe_tool",
+            "arguments": {
+                "tool_name": "vyapaar_forecast_series"
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none());
+        let res = result.unwrap();
+        let structured = &res["structuredContent"];
+        assert_eq!(structured["schema"], "vyapaar/result/v1");
+        assert_eq!(structured["status"], "ok");
+        let data = &structured["data"];
+        assert_eq!(data["tool_name"], "vyapaar_forecast_series");
+        assert!(data["schema"]["inputSchema"].is_object());
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_gateway_describe_tool_unknown() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(103),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_describe_tool",
+            "arguments": {
+                "tool_name": "nonexistent_tool"
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { error, .. } = resp {
+        assert!(error.is_some());
+    } else {
+        panic!("expected error for unknown tool");
+    }
+}
+
+#[tokio::test]
+async fn test_gateway_read_result() {
+    let server = McpServer::new();
+
+    // First export a reference via the data store directly
+    let uri = server.data_store.export(
+        "ohlcv_test",
+        serde_json::json!({"instrument": "NSE:RELIANCE-EQ", "close": "2500.00"}),
+    );
+
+    let msg = RpcMessage::Request {
+        id: json!(104),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_read_result",
+            "arguments": {
+                "ref_id": uri,
+                "offset": 0,
+                "limit": 10
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none());
+        let res = result.unwrap();
+        let structured = &res["structuredContent"];
+        assert_eq!(structured["schema"], "vyapaar/result/v1");
+        assert_eq!(structured["status"], "ok");
+        let data = &structured["data"];
+        assert_eq!(data["ref_id"], uri);
+        assert_eq!(data["data"]["instrument"], "NSE:RELIANCE-EQ");
+        assert_eq!(data["data"]["close"], "2500.00");
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_gateway_read_result_unknown_ref() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(105),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_read_result",
+            "arguments": {
+                "ref_id": "$vyapaar/ref/does-not-exist"
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { error, .. } = resp {
+        assert!(error.is_some());
+    } else {
+        panic!("expected error for unknown reference");
     }
 }

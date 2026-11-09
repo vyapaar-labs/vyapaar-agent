@@ -270,6 +270,69 @@ pub fn list_tool_definitions() -> Vec<serde_json::Value> {
                 "required": ["series"]
             }
         }),
+        // --- Two-Tier Gateway Discovery Protocol ---
+        json!({
+            "name": "vyapaar_search_tools",
+            "category": "discovery",
+            "description": "Search tools by natural language query, asset class, or analytical category; returns ranked tool names, categories, and taglines.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search keyword or intent (e.g. 'GARCH', 'RSI', 'portfolio risk')"
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["market", "technicals", "scanner", "analytics", "allocation", "regimes", "volatility", "research", "ledger", "discovery", "all"],
+                        "default": "all",
+                        "description": "Filter results by tool category"
+                    }
+                },
+                "required": ["query"]
+            }
+        }),
+        json!({
+            "name": "vyapaar_describe_tool",
+            "category": "discovery",
+            "description": "Return the full JSON-Schema, parameter constraints, mathematical definitions, and examples for a chosen tool.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "tool_name": {
+                        "type": "string",
+                        "description": "The exact tool name (e.g. 'vyapaar_technicals_calculate')"
+                    }
+                },
+                "required": ["tool_name"]
+            }
+        }),
+        json!({
+            "name": "vyapaar_read_result",
+            "category": "discovery",
+            "description": "Read a previously exported data reference by its $vyapaar/ref/<uuid> URI, with optional offset/limit pagination for array payloads.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "ref_id": {
+                        "type": "string",
+                        "description": "The $vyapaar/ref/<uuid> reference URI returned by a previous tool call"
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Offset into array payloads for pagination"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Maximum number of array elements to return"
+                    }
+                },
+                "required": ["ref_id"]
+            }
+        }),
     ]
 }
 
