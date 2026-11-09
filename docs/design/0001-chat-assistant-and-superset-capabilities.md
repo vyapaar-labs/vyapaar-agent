@@ -3,13 +3,13 @@
 > **Status**: Proposed (design only — nothing in this document is implemented).
 > **Owner repo**: `vyapaar-agent`. **Also touches**: `vyapaar-runtime` (recommendations only, §9 and §15.3), `vyapaar-ledger` and `vyapaar-core` (boundary statements only, no changes requested), `vyapaar-ui` (consumer of the API defined here).
 > **Supersedes**: the open questions in `vyapaar-ui/docs/plans/0001-agent-chat-terminal-from-artha.md` §6, and the "`AgentTool` purity" caveat in §2/§3 of the same doc.
-> **Authoritative context**: `vyapaar-agent/docs/design/architecture.md` (13-crate topology, NoFX principle), `vyapaar-agent/docs/migration-guide.md`, `vyapaar-runtime/docs/migration-guide.md`, `vyapaar-runtime/docs/design/architecture.md`, `docs/roadmap/roadmap.md`.
+> **Authoritative context**: `vyapaar-agent/docs/design/architecture.md` (13-crate topology, NoFX principle), `vyapaar-agent/docs/design/code-migration-map.md`, `vyapaar-runtime/docs/design/code-migration-map.md`, `vyapaar-runtime/docs/design/architecture.md`, `docs/roadmap/roadmap.md`.
 
 ---
 
 > ## ⛔ Implementation gate — read before writing any code
 >
-> **This design MUST NOT be implemented until both of the following roadmap milestones are complete and verified** (all boxes checked in `docs/roadmap/roadmap.md`, and each repo's `migration-guide.md` §3 verification commands passing on `main`):
+> **This design MUST NOT be implemented until both of the following roadmap milestones are complete and verified** (all boxes checked in `docs/roadmap/roadmap.md`, and each repo's `docs/roadmap/migration-verification.md` verification commands passing on `main`):
 >
 > 1. **Milestone 3.1** — `vyapaar-agent` migrated from `honba-nou` (10 ported crates) plus the three originally-scoped new crates (`vyapaar-agent-tools`, `vyapaar-agent-plugins`, `vyapaar-agent-report`) in their **original, narrow** scope.
 > 2. **Milestone 3.2** — `vyapaar-runtime` migrated from `honba-ya` (9 ported crates) plus `vyapaar-runtime-jobs` in its **original, narrow** scope.
@@ -130,7 +130,7 @@ Dependency rules (enforced by a `cargo metadata`-based test in `vyapaar-agent/te
 
 ### 4.1 Decision
 
-`vyapaar-agent-tools` is **kept pure**, exactly as its migration-guide row says ("Implement pure `AgentTool` trait, `ToolCall`, `ToolOutput`, `ToolRegistry`"). The broader, I/O-capable conversational tool set lives in the **new** crate `vyapaar-agent-chat-tools`, implementing a **new**, async `ChatTool` trait. `architecture.md`'s framing of `vyapaar-agent-tools` stays correct and does not need rewriting; it gains one sentence (§15.1) noting that its tools are also exposed to chat through an adapter.
+`vyapaar-agent-tools` is **kept pure**, exactly as its migration-map row says ("Implement pure `AgentTool` trait, `ToolCall`, `ToolOutput`, `ToolRegistry`"). The broader, I/O-capable conversational tool set lives in the **new** crate `vyapaar-agent-chat-tools`, implementing a **new**, async `ChatTool` trait. `architecture.md`'s framing of `vyapaar-agent-tools` stays correct and does not need rewriting; it gains one sentence (§15.1) noting that its tools are also exposed to chat through an adapter.
 
 The pure trait, as intended for Milestone 3.1 (shape to be confirmed against what 3.1 actually lands):
 
@@ -834,5 +834,5 @@ Each phase ends with a commit per logical step and an independent review/validat
 | `vyapaar-runtime/crates/vyapaar-runtime-persistence` | Implement `SessionStore` and `MemoryStore` (agent-core ports) with migrations for `agent_chat_*`, `agent_memory_*` (FTS5 / `tsvector`), `agent_watchlist*`, and (with jobs) `jobs_monitor_*`. Depend only on `vyapaar-agent-core` (R5). | Same runtime design doc. |
 | `vyapaar-runtime/crates/vyapaar-runtime-api` | Host the adapters implementing `vyapaar-agent-chat-tools::ports` (`PortfolioReader` over ledger repositories, `MarketReader` over `vyapaar-market`, `WatchlistStore`, `SnapshotSource`, `MonitorScheduler`, `BacktestRunner`), constructed per `RuntimeMode`. | Same runtime design doc. |
 | `vyapaar-ui/crates/vyapaar-tui`, `vyapaar-cli` | Consume `SessionHandle` / `SessionEvent` / `run_turn_headless` as specified in §5.3/§5.6 instead of the placeholder contract in `vyapaar-ui/docs/plans/0001-…` §4.2–4.3. | `vyapaar-ui` follow-up plan. |
-| `vyapaar-agent/docs/migration-guide.md`, `architecture.md` | Once this design is accepted: amend the tier sentence for R4 (`vyapaar-agent-chat-tools → vyapaar-ledger`, types only), add the two new crates to the topology table, and add the "`AgentTool`s are lifted into chat" note. Not edited by this document. | `vyapaar-agent` maintainers at acceptance. |
+| `vyapaar-agent/docs/design/code-migration-map.md`, `architecture.md` | Once this design is accepted: amend the tier sentence for R4 (`vyapaar-agent-chat-tools → vyapaar-ledger`, types only), add the two new crates to the topology table, and add the "`AgentTool`s are lifted into chat" note. Not edited by this document. | `vyapaar-agent` maintainers at acceptance. |
 | `vyapaar-ledger`, `vyapaar-core`, `vyapaar-risk` | **No changes requested.** Ledger types are consumed read-only; no I/O is added; `Decision` grammar is untouched. | — |

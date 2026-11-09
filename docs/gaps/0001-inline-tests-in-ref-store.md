@@ -24,7 +24,7 @@ mod tests {
 The workspace TDD rule (`.agents/AGENTS.md §3.2`) strictly forbids in-file `#[test]` blocks inside production `src/` files. Production source files must remain focused on business logic; tests must live in `crates/vyapaar-agent-core/tests/`. Leaving inline tests in production source:
 - Clutters the production module with test scaffolding.
 - Prevents clean separation of concerns.
-- Fails the migration-guide verification step (`grep -rn "#\[cfg(test)\]" crates/*/src/` must return nothing).
+- Fails the migration verification step in `docs/roadmap/migration-verification.md` (`grep -rn "#\[cfg(test)\]" crates/*/src/` must return nothing).
 
 ## How to Close
 

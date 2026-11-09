@@ -1,6 +1,7 @@
 # HANDOFF — vyapaar-agent
 
-**Status**: All implemented plans (0001–0005) complete and merged to `main`. New documentation batch added: `docs/gaps/` (7 open gaps), `docs/plans/` (plans 0002 & 0003 active), `docs/design/` (9 code reference docs), `docs/roadmap/` (updated). Batch done.
+**Status**: All implemented plans (0001–0005) complete and merged to `main`. New documentation batch added: `docs/gaps/` (7 open gaps), `docs/plans/` (plans 0002 & 0003 active), `docs/design/` (migration map + guardrails + 9 code reference docs), `docs/roadmap/` (updated + migration verification). Batch done.
+- `docs/migration-guide.md` decimated: sub-crate mapping table moved to `docs/design/code-migration-map.md`; guardrails & invariants moved to `docs/design/code-guardrails.md`; verification commands moved to `docs/roadmap/migration-verification.md`; original `migration-guide.md` removed.
 **Date**: 2026-11-09 · Repo: `vyapaar-agent` · Branch: `main`
 
 ## Phase / Slice Status (COMPLETE — merged)
