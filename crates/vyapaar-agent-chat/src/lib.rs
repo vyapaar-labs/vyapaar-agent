@@ -31,6 +31,7 @@ pub use permission::{
     ConfirmOverride, PermissionDecision, PermissionPolicy, PermissionPrompt, PermissionResponder,
     ToolRisk, ToolTraits,
 };
+pub use session::checkpoint::{Checkpoint, ExportFormat, SessionCheckpointer};
 pub use session::{SessionActor, SessionEvents, SessionHandle, SessionSelector};
 pub use testing::{FakeChatTool, InMemoryMemoryStore, InMemorySessionStore};
 pub use tool::{ChatTool, PlanContext, ToolContext, ToolPlan, ToolRegistry, ToolSet};

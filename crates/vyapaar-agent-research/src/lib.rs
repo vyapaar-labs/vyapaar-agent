@@ -26,6 +26,7 @@ pub mod enhancer;
 pub mod hypothesis;
 pub mod manifest;
 pub mod verification;
+pub mod verify;
 
 /// LLM-backed research-loop helpers (enabled by the `llm` feature).
 #[cfg(feature = "llm")]
@@ -48,4 +49,7 @@ pub use hypothesis::{Hypothesis, HypothesisGenerator, MarketRegime};
 pub use manifest::DatasetManifest;
 pub use verification::{
     StatisticalVerificationReport, StatisticalVerifier, VerificationThresholds,
+};
+pub use verify::{
+    StrategyManifest, StrategyVerifier, VerificationError, VerificationReport, Violation,
 };
