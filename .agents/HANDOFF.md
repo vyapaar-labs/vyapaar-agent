@@ -1,58 +1,35 @@
 # HANDOFF — vyapaar-agent
 
-**Status**: Plan 0004 Phase 4 determinism hardening implemented, verified, and committed.  
+**Status**: Plan 0002 complete; plan 0004 Phase 4 complete; plan 0005 finalized. Ready to merge to main.  
 **Date**: 2026-11-09 · Repo: `vyapaar-agent` · Branch: `feat/agent-0004-phase4-local-slm-determinism`
 
-## Phase / Slice Status (COMPLETE — this batch)
+## Phase / Slice Status (COMPLETE — this branch)
 
-Plan 0004 Phase 4 (local SLM / Tier 1 determinism hardening, per plan 0005 §4):
-
-- **Determinism fingerprint on the audited record** (`vyapaar-agent-replay::audit`):
-  `LlmAuditRecord` gains `engine`, `engine_version`, `model_file_sha256`, `quantization`,
-  `thread_count`, `hardware` fields with `with_*` builders. `compute_record_hash` chains on the
-  fingerprint so two records differing only in serving stack hash differently (deterministic
-  replay requirement: `prompt + seed + temperature = 0` must pin the exact engine/weights).
-- **`hash_file` utility** (`vyapaar-agent-replay::audit`): streams a `.gguf` model file in 64 KiB
-  chunks and returns its SHA-256, so the exact weights (not just the model name tag) are pinned.
-- **`CandleGgufProvider::fingerprint()`** (`vyapaar-agent-llm/src/candle_gguf.rs`): async method
-  computing engine id, candle-core version, model-file hash (offloaded to `spawn_blocking`),
-  quantization (from file name), thread count, and hardware identity.
-- Fixed pre-existing `clippy::collapsible_match` in `candle_gguf.rs::generate` (line shifted by
-  additions) so the touched crate is clippy `-D warnings` clean.
-- Tests: `tests/audit_fingerprint_tests.rs` (5 tests) parallel to `src/`; all pass. Live SLM tests
-  in `candle_gguf_tests.rs` ran against the downloaded `models/zenfinance-3b-Instruct.Q4_K_M.gguf`
-  and pass.
-
-Commits: one batch commit (implementation + tests).
+- **Plan 0002** (job scheduler, memory engine, strategy verification, session checkpoints): commits `d27da44` + `ec54849` + `58255fb`.
+- **Plan 0004 Phase 4** (local SLM determinism hardening, plan 0005 §4): commit `b703a59`.
+  - `vyapaar-agent-replay`: `LlmAuditRecord` fingerprint fields (`engine`, `engine_version`, `model_file_sha256`, `quantization`, `thread_count`, `hardware`) + `with_*` builders; `hash_file()` utility; `compute_record_hash` chains on the fingerprint.
+  - `vyapaar-agent-llm`: `CandleGgufProvider::fingerprint()`; fixed pre-existing `clippy::collapsible_match` in `generate()`.
+  - Tests: `tests/audit_fingerprint_tests.rs` (5 tests, pass); live candle_gguf tests run against downloaded `models/*.gguf` and pass.
+- **Plan 0005** (reference material): finalized — moved to Implemented Plans in `docs/plans/README.md` citing commit `b703a59`; plan doc removed per cleanup rule. Its actionable output (determinism fingerprint) is implemented in `b703a59`; licensing/quantization/determinism findings were captured in the plan document.
 
 ## Decisions & Discoveries
 
-- Models already downloaded at `/home/pmallapp/Devel/Finance/vyapaar-labs/models/`:
-  `Llama-3.2-3B-Instruct-Q4_K_M.gguf` (2GB), `zenfinance-3b-Instruct.Q4_K_M.gguf` (270MB),
-  `SmolLM2-360M-Instruct.Q4_K_M.gguf` (270MB).
-- The Tier-1 local-SLM provider role is filled by the existing `CandleGgufProvider` (pure-Rust
-  Candle, CPU, tested live) rather than a `LlamaCppProvider` — same purpose, no new engine.
-- Two parallel `LlmAuditRecord` types exist (llm crate + replay crate). The replay crate's record
-  is the canonical hash-chained audited record and is the one fingerprinted here.
-- `std::arch::arch_info()` is nightly-only; hardware identity uses stable `std::env::consts`.
+- Tier-1 local-SLM provider role filled by existing `CandleGgufProvider` (pure-Rust Candle CPU, tested live) rather than new `LlamaCppProvider`/`VllmProvider` impls named in 0005 — same purpose, no new engine.
+- Two parallel `LlmAuditRecord` types exist (llm crate + replay crate); replay crate's record is the canonical hash-chained audited record and is the one fingerprinted.
+- Models already downloaded at `/home/pmallapp/Devel/Finance/vyapaar-labs/models/`: `Llama-3.2-3B-Instruct-Q4_K_M.gguf`, `zenfinance-3b-Instruct.Q4_K_M.gguf`, `SmolLM2-360M-Instruct.Q4_K_M.gguf`.
 
-## Remaining (deferred in plan 0004 by design; not part of this batch)
+## Remaining (explicit deferral per plan 0004 design)
 
-- QLoRA fine-tuning on Phase-3 fixtures (`tests/golden/omniroute_decision_fixtures.json`) — needs
-  GPU + a fine-tuning pipeline; no gap filed because it is an explicit plan deferral, not a stub.
-- Trade-off note: `CandleGgufProvider` loads on `Device::Cpu` with fixed seed 42; per plan 0005 §4,
-  full CPU determinism also wants thread/BLAS pinning (`OMP_NUM_THREADS=1`) — fingerprint captures
-  thread count so it can be audited, but BLAS pinning is deployment ops, not code.
+- QLoRA fine-tuning on Phase-3 fixtures — needs GPU + training pipeline; not stubbed, deferred.
+- BLAS/OMP thread pinning for full CPU determinism — deployment ops; thread count is now auditable via the fingerprint.
 
 ## Immediate Next Step
 
-None — batch complete. Next plan per `docs/plans/README.md` is 0005 (reference material only) or
-another bounded context.
+Merge `feat/agent-0004-phase4-local-slm-determinism` into `main`.
 
 ## Operating Invariants
 
 - Canonical profile `prod`: `cargo build/check/test --profile prod`.
 - Tests in `tests/` parallel to `src/`; no in-file `#[test]`.
 - Zero floats in financial paths; `rust_decimal::Decimal` for temperature.
-- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --profile prod`
-  green on touched crates; workspace `cargo check --profile prod` green.
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --profile prod` green on touched crates; workspace `cargo check --profile prod` green.
