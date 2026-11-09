@@ -32,18 +32,21 @@
   - [x] `vyapaar-runtime`: SQLite & Postgres migrations (`agent_chat_session`, `agent_chat_message`) and `SqlxSessionStore` implementation in `vyapaar-runtime-persistence`.
   - [x] `vyapaar-ui`: `vyapaar-highlight` lexer, `vyapaar-tui` AgentChat tab state machine, and `vyapaar-cli ask` headless runner.
 
-### Phase B: Read-Only Tools (Planned)
-- [ ] Create `vyapaar-agent-chat-tools` crate.
-- [ ] Implement `PureToolAdapter` lifting pure `AgentTool`s into chat.
-- [ ] Consumer-owned reader ports (`MarketReader`, `PortfolioReader`, `WatchlistStore`) and pure `research_calc`.
+### Phase B: Read-Only Tools (Planned — tracked by plan 0002)
+- [ ] Create `vyapaar-agent-chat-tools` crate (gap 0002)
+- [ ] Implement `PureToolAdapter` lifting pure `AgentTool`s into chat (gap 0002)
+- [ ] Consumer-owned reader ports (`MarketReader`, `PortfolioReader`, `WatchlistStore`) and pure `research_calc` (gap 0002)
 
-### Phase C: Persistent Memory (Planned)
-- [ ] `UserMemory` implementation with profile budgeters and recall section renderers.
-- [ ] Cache-hit regression tests for prompt caching.
+### Phase C: Persistent Memory (Planned — tracked by plan 0003)
+- [ ] `UserMemory` implementation with profile budgeters and recall section renderers (gap 0003)
+- [ ] Cache-hit regression tests for prompt caching (gap 0007)
 
-### Phase D: Monitors & Background Tasks (Planned)
-- [ ] Runtime-agent monitor scheduler bridge.
+### Phase D: Monitors & Background Tasks (Planned — tracked by plan 0003)
+- [ ] Runtime-agent monitor scheduler bridge (gap 0006)
 
-### Phase E: Reports, Plugins & MCP Client (Planned)
-- [ ] `ResearchNote` in `vyapaar-agent-report`.
-- [ ] MCP stdio client bridge in `vyapaar-agent-mcp`.
+### Phase E: Reports, Plugins & MCP Client (Planned — tracked by plan 0003)
+- [ ] `ResearchNote` in `vyapaar-agent-report` (gap 0005)
+- [ ] MCP stdio client bridge in `vyapaar-agent-mcp` (gap 0004)
+
+## Cross-Cutting Cleanup (tracked by plan 0002)
+- [ ] Remove inline `#[cfg(test)]` block from `vyapaar-agent-core/src/ref_store.rs` (gap 0001); move tests to `crates/vyapaar-agent-core/tests/ref_store_tests.rs`.

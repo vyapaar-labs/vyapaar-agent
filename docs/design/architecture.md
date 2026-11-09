@@ -33,11 +33,11 @@ These rules are enforced at build time via `cargo check` and regression-tested v
 | `vyapaar-agent-analytics` | Performance attribution, Deflated Sharpe Ratio (DSR), regime classification, and drawdown analytics. |
 | `vyapaar-agent-genetic` | StockSharp Odysseus-style genetic programming & rule-tree strategy synthesizer. |
 | `vyapaar-agent-mcp` | Model Context Protocol (`rmcp`) server exposing market, portfolio, and backtest tools to external AI clients. |
-| `vyapaar-agent-tools` | Typed, pure `AgentTool` registry for screener queries, regime checks, and risk inspection. Lifted into chat via `PureToolAdapter`. |
+| `vyapaar-agent-tools` | Typed, pure `AgentTool` registry for screener queries, regime checks, and risk inspection. Lifted into chat via `PureToolAdapter` (lift crate `vyapaar-agent-chat-tools` planned — gap 0002). |
 | `vyapaar-agent-plugins` | Extensible plugin manifest (`PluginManifest`) and capability loader for custom research skills. |
 | `vyapaar-agent-report` | Embedded Typst / Markdown quantitative research tearsheet & PDF report generator. |
 
-*(Note: Workspace will expand to 15 crates in Phase B with the addition of `vyapaar-agent-chat-tools`.)*
+*(Note: `vyapaar-agent-chat-tools` is the 15th crate, planned in Phase B — gap 0002.)*
 
 ## 4. Pure vs. Async Tooling Model
 - **Pure `AgentTool` (`vyapaar-agent-tools`)**: Synchronous, side-effect-free, deterministic. Used by the trader loop and backtest replay. Replay determinism requires that tools in this registry cannot perform network or database I/O.
