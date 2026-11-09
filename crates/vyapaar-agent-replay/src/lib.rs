@@ -20,8 +20,8 @@ pub mod fixture;
 pub mod replayer;
 
 pub use audit::{
-    AuditChainLedger, ChainedLlmAuditRecord, LlmAuditRecord, compute_record_hash, hash_request,
-    verify_hash_chain,
+    AuditChainLedger, ChainedLlmAuditRecord, LlmAuditRecord, compute_record_hash, hash_file,
+    hash_request, verify_hash_chain,
 };
 pub use cache::{InMemoryPromptCache, JsonlPromptCache, PromptCache, SqlitePromptCache};
 pub use error::ReplayError;

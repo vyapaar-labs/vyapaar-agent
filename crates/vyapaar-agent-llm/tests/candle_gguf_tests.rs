@@ -126,11 +126,23 @@ async fn test_live_zenfinance_generate_trade_decision() {
     let provider = CandleGgufProvider::new(config);
 
     let prompt = "Bullish breakout on INFY. Generate a place_order decision to buy 15 shares of INFY with algo_id SEBI_ALGO_01 at limit price 1550.";
-    let (raw_output, decision) = provider.generate(prompt).await.expect("Decision parsing failed");
-    println!("\n[ZenFinance Live Generation]\nRaw output:\n{}\nParsed decision:\n{:?}\n", raw_output, decision);
+    let (raw_output, decision) = provider
+        .generate(prompt)
+        .await
+        .expect("Decision parsing failed");
+    println!(
+        "\n[ZenFinance Live Generation]\nRaw output:\n{}\nParsed decision:\n{:?}\n",
+        raw_output, decision
+    );
 
     match decision {
-        vyapaar_core::Decision::PlaceOrder { symbol, side, qty, algo_id, .. } => {
+        vyapaar_core::Decision::PlaceOrder {
+            symbol,
+            side,
+            qty,
+            algo_id,
+            ..
+        } => {
             assert!(symbol.contains("INFY"), "symbol was {}", symbol);
             assert_eq!(side, vyapaar_core::OrderSide::Buy);
             assert_eq!(qty.0, rust_decimal_macros::dec!(15));
@@ -162,12 +174,21 @@ async fn test_live_zenfinance_generate_hold_decision() {
     let provider = CandleGgufProvider::new(config);
 
     let prompt = "Market is choppy with no clear trend in NIFTY 50 before election results. Generate a hold decision.";
-    let (raw_output, decision) = provider.generate(prompt).await.expect("Decision parsing failed");
-    println!("\n[ZenFinance Live Hold Generation]\nRaw output:\n{}\nParsed decision:\n{:?}\n", raw_output, decision);
+    let (raw_output, decision) = provider
+        .generate(prompt)
+        .await
+        .expect("Decision parsing failed");
+    println!(
+        "\n[ZenFinance Live Hold Generation]\nRaw output:\n{}\nParsed decision:\n{:?}\n",
+        raw_output, decision
+    );
 
     match decision {
         vyapaar_core::Decision::Hold { reason } => {
-            assert!(reason.is_some(), "Hold should include an explanation reason");
+            assert!(
+                reason.is_some(),
+                "Hold should include an explanation reason"
+            );
         }
         other => panic!("Expected Hold decision, got: {other:?}"),
     }
