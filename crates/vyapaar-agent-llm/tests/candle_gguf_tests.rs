@@ -69,7 +69,16 @@ async fn test_provider_nonexistent_model_fails_with_clear_error() {
     }
 }
 
+// The three `test_live_*` tests below run real candle GGUF inference. Whenever
+// `models/zenfinance-3b-Instruct.Q4_K_M.gguf` exists (2 GB, Q4_K_M 3B) they load the model
+// three times concurrently and generate tokens on CPU — minutes of wall time, load-dependent,
+// and impossible on CI machines without the model file. That makes the default
+// `cargo test --workspace --profile prod` gate slow and machine-dependent, so they are
+// `#[ignore]`d like the per-workload OmniRoute integration tests (root HANDOFF, batch 4B):
+// run them explicitly when wanted with
+// `cargo test -p vyapaar-agent-llm --test candle_gguf_tests -- --ignored`.
 #[tokio::test]
+#[ignore = "live GGUF inference (minutes of CPU work when the zenfinance model file exists); run with --ignored"]
 async fn test_live_zenfinance_if_present() {
     let candidates = [
         "../../../models/zenfinance-3b-Instruct.Q4_K_M.gguf",
@@ -108,6 +117,7 @@ async fn test_live_zenfinance_if_present() {
 }
 
 #[tokio::test]
+#[ignore = "live GGUF inference (minutes of CPU work when the zenfinance model file exists); run with --ignored"]
 async fn test_live_zenfinance_generate_trade_decision() {
     let candidates = [
         "../../../models/zenfinance-3b-Instruct.Q4_K_M.gguf",
@@ -156,6 +166,7 @@ async fn test_live_zenfinance_generate_trade_decision() {
 }
 
 #[tokio::test]
+#[ignore = "live GGUF inference (minutes of CPU work when the zenfinance model file exists); run with --ignored"]
 async fn test_live_zenfinance_generate_hold_decision() {
     let candidates = [
         "../../../models/zenfinance-3b-Instruct.Q4_K_M.gguf",
