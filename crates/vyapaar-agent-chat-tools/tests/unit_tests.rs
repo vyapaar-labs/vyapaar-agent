@@ -18,8 +18,8 @@ use vyapaar_agent_chat_tools::ports::alert::{AlertReader, AlertStatus, AlertWrit
 use vyapaar_agent_chat_tools::ports::content::{ContentReader, FilingRecord, NewsArticle};
 use vyapaar_agent_chat_tools::ports::error::PortError;
 use vyapaar_agent_chat_tools::ports::market::{
-    BlockDeal, InstrumentSearchResult, MacroSeries, MarketBar, MarketHistory, MarketIndicators,
-    MarketQuote, MarketReader,
+    BlockDeal, CorporateAction, InstrumentSearchResult, MacroSeries, MarketBar, MarketHistory,
+    MarketIndicators, MarketQuote, MarketReader, OptionContract, OptionsChain,
 };
 use vyapaar_agent_chat_tools::ports::portfolio::{
     AccountSummary, DateRange, OrderFilter, PortfolioReader,
@@ -162,6 +162,97 @@ impl MarketReader for MockMarketReader {
             Price(dec!(2750.0)),
             Price(dec!(2500.0)),
         ))
+    }
+
+    async fn options_chain(
+        &self,
+        underlying: &InstrumentId,
+        expiry: Option<DateTime<Utc>>,
+        limit: Option<usize>,
+    ) -> Result<OptionsChain, PortError> {
+        if self.fail_quotes {
+            return Err(PortError::unavailable(
+                "options-chain data is not served yet — see vyapaar-market/docs/gaps/0001-options-chain-reader.md",
+            ));
+        }
+        let mut contracts = vec![
+            OptionContract {
+                instrument: InstrumentId::new(Exchange::Nfo, "NIFTY26NOV24000CE"),
+                option_type: "CE".to_string(),
+                strike: Price(dec!(24000.0)),
+                expiry: Utc::now() + chrono::Duration::days(14),
+                lot_size: Quantity(dec!(75.0)),
+                last_price: Some(Price(dec!(210.5))),
+                bid: Some(Price(dec!(209.0))),
+                ask: Some(Price(dec!(212.0))),
+                open_interest: Some(Quantity(dec!(1250000.0))),
+            },
+            OptionContract {
+                instrument: InstrumentId::new(Exchange::Nfo, "NIFTY26NOV24000PE"),
+                option_type: "PE".to_string(),
+                strike: Price(dec!(24000.0)),
+                expiry: Utc::now() + chrono::Duration::days(14),
+                lot_size: Quantity(dec!(75.0)),
+                last_price: Some(Price(dec!(195.0))),
+                bid: None,
+                ask: None,
+                open_interest: None,
+            },
+        ];
+        if let Some(exp) = expiry {
+            contracts.retain(|c| c.expiry.date_naive() == exp.date_naive());
+        }
+        if let Some(l) = limit {
+            contracts.truncate(l);
+        }
+        Ok(OptionsChain {
+            underlying: underlying.clone(),
+            as_of: Utc::now(),
+            contracts,
+        })
+    }
+
+    async fn corporate_actions(
+        &self,
+        instrument: Option<&InstrumentId>,
+        action_type: Option<&str>,
+        limit: Option<usize>,
+    ) -> Result<Vec<CorporateAction>, PortError> {
+        if self.fail_quotes {
+            return Err(PortError::unavailable(
+                "corporate-actions data is Python-side only — see vyapaar-data/docs/gaps/0008-corporate-actions-rust-bridge.md",
+            ));
+        }
+        let inst = instrument
+            .cloned()
+            .unwrap_or_else(|| InstrumentId::new(Exchange::Nse, "RELIANCE"));
+        let mut actions = vec![
+            CorporateAction {
+                instrument: inst.clone(),
+                action_type: "dividend".to_string(),
+                ex_date: Utc::now() - chrono::Duration::days(20),
+                record_date: Some(Utc::now() - chrono::Duration::days(21)),
+                amount: Some(Money::inr(dec!(4.0))),
+                ratio_from: None,
+                ratio_to: None,
+            },
+            CorporateAction {
+                instrument: inst,
+                action_type: "split".to_string(),
+                ex_date: Utc::now() - chrono::Duration::days(90),
+                record_date: None,
+                amount: None,
+                ratio_from: Some(Quantity(dec!(1.0))),
+                ratio_to: Some(Quantity(dec!(2.0))),
+            },
+        ];
+        if let Some(ty) = action_type {
+            actions.retain(|a| a.action_type == ty);
+        }
+        if let Some(l) = limit {
+            actions.truncate(l);
+        }
+        Ok(actions)
     }
 }
 
@@ -826,6 +917,157 @@ async fn test_content_tools() {
 }
 
 #[tokio::test]
+async fn test_options_and_corporate_actions_tools() {
+    let market = Arc::new(MockMarketReader { fail_quotes: false });
+    let mut registry = ToolRegistry::new();
+    register_read_only_tools(
+        &mut registry,
+        Arc::new(MockPortfolioReader),
+        market,
+        Arc::new(MockContentReader {
+            fail_content: false,
+        }),
+        None,
+    );
+
+    // 1. Both tools registered and read-only.
+    let chain_tool = registry
+        .get("options_chain")
+        .expect("options_chain registered");
+    assert_eq!(chain_tool.traits().risk, ToolRisk::ReadOnly);
+    let actions_tool = registry
+        .get("corporate_actions")
+        .expect("corporate_actions registered");
+    assert_eq!(actions_tool.traits().risk, ToolRisk::ReadOnly);
+
+    // 2. options_chain — success, no filters (defaults to full chain).
+    let out = chain_tool
+        .execute(
+            serde_json::json!({ "underlying": "NSE:NIFTY" }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert!(out.ok);
+    assert_eq!(out.payload["underlying"], "NSE:NIFTY");
+    assert_eq!(out.payload["count"], 2);
+    let ce = &out.payload["contracts"][0];
+    assert_eq!(ce["instrument"], "NFO:NIFTY26NOV24000CE");
+    assert_eq!(ce["option_type"], "CE");
+    assert_eq!(parse_dec(&ce["strike"]), 24000.0);
+    assert_eq!(parse_dec(&ce["lot_size"]), 75.0);
+    assert_eq!(parse_dec(&ce["last_price"]), 210.5);
+    assert_eq!(parse_dec(&ce["open_interest"]), 1250000.0);
+    assert!(ce["expiry"].is_string());
+    let pe = &out.payload["contracts"][1];
+    assert_eq!(pe["option_type"], "PE");
+    assert!(pe["bid"].is_null());
+    assert!(pe["open_interest"].is_null());
+
+    // 3. options_chain — limit caps the returned contracts.
+    let out = chain_tool
+        .execute(
+            serde_json::json!({ "underlying": "NSE:NIFTY", "limit": 1 }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.payload["count"], 1);
+
+    // 4. options_chain — unknown exchange rejected as invalid arguments.
+    let err = chain_tool
+        .execute(
+            serde_json::json!({ "underlying": "BOGUS:NIFTY" }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ToolError::InvalidArguments { .. }),
+        "unknown exchange must surface as ToolError::InvalidArguments, got {err:?}"
+    );
+
+    // 5. options_chain — deny_unknown_fields rejects unexpected arguments.
+    let err = chain_tool
+        .execute(
+            serde_json::json!({ "underlying": "NSE:NIFTY", "bogus": true }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ToolError::InvalidArguments { .. }),
+        "unknown field must be rejected, got {err:?}"
+    );
+
+    // 6. corporate_actions — success, no filters.
+    let out = actions_tool
+        .execute(serde_json::json!({}), dummy_tool_context())
+        .await
+        .unwrap();
+    assert!(out.ok);
+    assert_eq!(out.payload["count"], 2);
+    assert_eq!(out.payload["actions"][0]["instrument"], "NSE:RELIANCE");
+    assert_eq!(out.payload["actions"][0]["action_type"], "dividend");
+    assert_eq!(parse_dec(&out.payload["actions"][0]["amount"]), 4.0);
+    assert!(out.payload["actions"][0]["ex_date"].is_string());
+    assert!(out.payload["actions"][0]["record_date"].is_string());
+    assert_eq!(out.payload["actions"][1]["action_type"], "split");
+    assert!(out.payload["actions"][1]["amount"].is_null());
+    assert_eq!(parse_dec(&out.payload["actions"][1]["ratio_to"]), 2.0);
+
+    // 7. corporate_actions — action-type filter parsed through to the port.
+    let out = actions_tool
+        .execute(
+            serde_json::json!({ "action_type": "split" }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.payload["count"], 1);
+    let out = actions_tool
+        .execute(
+            serde_json::json!({ "instrument": "NSE:RELIANCE", "action_type": "bonus" }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert!(out.ok);
+    assert_eq!(out.payload["count"], 0);
+
+    // 8. Honest unavailability when no upstream source/bridge exists.
+    let failing = Arc::new(MockMarketReader { fail_quotes: true });
+    let mut fail_registry = ToolRegistry::new();
+    register_read_only_tools(
+        &mut fail_registry,
+        Arc::new(MockPortfolioReader),
+        failing,
+        Arc::new(MockContentReader {
+            fail_content: false,
+        }),
+        None,
+    );
+    for (name, input) in [
+        (
+            "options_chain",
+            serde_json::json!({ "underlying": "NSE:NIFTY" }),
+        ),
+        ("corporate_actions", serde_json::json!({})),
+    ] {
+        let err = fail_registry
+            .get(name)
+            .unwrap()
+            .execute(input, dummy_tool_context())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ToolError::Execution(..)),
+            "unavailable port must surface as ToolError::Execution, got {err:?}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn test_alert_tools() {
     let store = Arc::new(MockAlertStore::new());
     let reader: Arc<dyn AlertReader> = store.clone();
@@ -1190,7 +1432,7 @@ async fn test_total_read_only_catalogue_count() {
 
     register_read_only_tools(&mut registry, portfolio, market, content, None);
     let specs = registry.specs();
-    assert_eq!(specs.len(), 17);
+    assert_eq!(specs.len(), 19);
 
     for spec in &specs {
         let tool = registry.get(&spec.name).unwrap();

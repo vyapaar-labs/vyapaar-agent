@@ -19,6 +19,15 @@ use crate::ports::portfolio::DateRange;
 /// Maximum allowable bars returned to conversation turn to respect token budgets (§6.5).
 pub const MAX_BARS_LIMIT: usize = 500;
 
+/// Maximum number of option contracts returned per chain call (token budget cap, §6.5).
+pub const MAX_CHAIN_CONTRACTS: usize = 500;
+
+/// Maximum number of corporate actions returned per call (token budget cap, §6.5).
+pub const MAX_ACTIONS_LIMIT: usize = 50;
+
+/// Default number of corporate actions when the caller passes no limit (§6.5).
+pub const DEFAULT_ACTIONS_LIMIT: usize = 20;
+
 /// Parse an instrument string such as `"NSE:RELIANCE"` or `"INFY"` (defaults to NSE).
 pub fn parse_instrument(s: &str) -> Result<InstrumentId, ToolError> {
     let trimmed = s.trim();
@@ -574,6 +583,221 @@ impl ChatTool for BlockDealsTool {
             serde_json::json!({
                 "deals": deals_json,
                 "count": deals_json.len(),
+            }),
+        ))
+    }
+}
+
+// ——————————————————————————————————————————————————————————————————————————
+// 7. options_chain
+// ——————————————————————————————————————————————————————————————————————————
+
+/// Input arguments for `options_chain`.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OptionsChainInput {
+    /// Underlying instrument symbol (e.g. "NSE:RELIANCE", "NFO:NIFTY").
+    pub underlying: String,
+    /// Optional expiry filter (RFC3339, e.g. "2026-11-26T00:00:00Z"). Omit for all expiries.
+    pub expiry: Option<String>,
+    /// Maximum number of contracts to return (capped at 500).
+    pub limit: Option<usize>,
+}
+
+/// Chat tool fetching the listed option chain for an underlying (§6.5, plan 0006 Phase 4).
+pub struct OptionsChainTool {
+    reader: Arc<dyn MarketReader>,
+    spec: ToolSpec,
+}
+
+impl OptionsChainTool {
+    /// Create new options chain tool.
+    pub fn new(reader: Arc<dyn MarketReader>) -> Self {
+        let schema = schemars::schema_for!(OptionsChainInput);
+        let spec = ToolSpec::new(
+            "options_chain",
+            "Fetch the listed option chain (strikes, expiries, quotes) for an underlying instrument.",
+            serde_json::to_value(schema).unwrap_or_default(),
+        );
+        Self { reader, spec }
+    }
+}
+
+#[async_trait]
+impl ChatTool for OptionsChainTool {
+    fn spec(&self) -> &ToolSpec {
+        &self.spec
+    }
+
+    fn traits(&self) -> ToolTraits {
+        ToolTraits::new(ToolRisk::ReadOnly)
+    }
+
+    fn plan(&self, input: &Value, _ctx: &PlanContext<'_>) -> Result<ToolPlan, ToolError> {
+        let inst = input
+            .get("underlying")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        Ok(ToolPlan::new(format!(
+            "Fetch the listed option chain for `{inst}`"
+        )))
+    }
+
+    async fn execute(&self, input: Value, _ctx: ToolContext) -> Result<ToolOutput, ToolError> {
+        let args: OptionsChainInput =
+            serde_json::from_value(input).map_err(|e| ToolError::InvalidArguments {
+                tool: "options_chain".to_string(),
+                message: format!("schema validation failure: {e}"),
+            })?;
+
+        let underlying = parse_instrument(&args.underlying)?;
+        let expiry = args.expiry.as_deref().and_then(parse_timestamp);
+        let capped_limit = match args.limit {
+            Some(l) => Some(l.min(MAX_CHAIN_CONTRACTS)),
+            None => Some(MAX_CHAIN_CONTRACTS),
+        };
+
+        let mut chain = self
+            .reader
+            .options_chain(&underlying, expiry, capped_limit)
+            .await
+            .map_err(|e| e.into_tool_error("options_chain"))?;
+
+        if chain.contracts.len() > MAX_CHAIN_CONTRACTS {
+            chain.contracts.truncate(MAX_CHAIN_CONTRACTS);
+        }
+
+        let contracts_json: Vec<Value> = chain
+            .contracts
+            .into_iter()
+            .map(|c| {
+                serde_json::json!({
+                    "instrument": c.instrument.to_string(),
+                    "option_type": c.option_type,
+                    "strike": c.strike.0,
+                    "expiry": c.expiry,
+                    "lot_size": c.lot_size.0,
+                    "last_price": c.last_price.map(|p| p.0),
+                    "bid": c.bid.map(|p| p.0),
+                    "ask": c.ask.map(|p| p.0),
+                    "open_interest": c.open_interest.map(|q| q.0),
+                })
+            })
+            .collect();
+
+        Ok(ToolOutput::ok(
+            "options_chain",
+            serde_json::json!({
+                "underlying": chain.underlying.to_string(),
+                "as_of": chain.as_of,
+                "contracts": contracts_json,
+                "count": contracts_json.len(),
+            }),
+        ))
+    }
+}
+
+// ——————————————————————————————————————————————————————————————————————————
+// 8. corporate_actions
+// ——————————————————————————————————————————————————————————————————————————
+
+/// Input arguments for `corporate_actions`.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CorporateActionsInput {
+    /// Instrument symbol filter (e.g. "NSE:RELIANCE", "TCS"). Omit for all instruments.
+    pub instrument: Option<String>,
+    /// Action-type filter — one of "dividend", "split", "bonus", "rights". Omit for all types.
+    pub action_type: Option<String>,
+    /// Maximum number of actions to return (default 20, cap 50).
+    pub limit: Option<usize>,
+}
+
+/// Chat tool fetching realized corporate actions for an instrument (§6.5, plan 0006 Phase 4).
+pub struct CorporateActionsTool {
+    reader: Arc<dyn MarketReader>,
+    spec: ToolSpec,
+}
+
+impl CorporateActionsTool {
+    /// Create new corporate actions tool.
+    pub fn new(reader: Arc<dyn MarketReader>) -> Self {
+        let schema = schemars::schema_for!(CorporateActionsInput);
+        let spec = ToolSpec::new(
+            "corporate_actions",
+            "Fetch realized corporate actions (dividends, splits, bonuses, rights) for an instrument.",
+            serde_json::to_value(schema).unwrap_or_default(),
+        );
+        Self { reader, spec }
+    }
+}
+
+#[async_trait]
+impl ChatTool for CorporateActionsTool {
+    fn spec(&self) -> &ToolSpec {
+        &self.spec
+    }
+
+    fn traits(&self) -> ToolTraits {
+        ToolTraits::new(ToolRisk::ReadOnly)
+    }
+
+    fn plan(&self, input: &Value, _ctx: &PlanContext<'_>) -> Result<ToolPlan, ToolError> {
+        let mut target = String::from("all instruments");
+        if let Some(inst) = input.get("instrument").and_then(Value::as_str) {
+            target = format!("`{inst}`");
+        }
+        if let Some(ty) = input.get("action_type").and_then(Value::as_str) {
+            target = format!("{target} of type `{ty}`");
+        }
+        Ok(ToolPlan::new(format!(
+            "Fetch corporate actions for {target}"
+        )))
+    }
+
+    async fn execute(&self, input: Value, _ctx: ToolContext) -> Result<ToolOutput, ToolError> {
+        let args: CorporateActionsInput =
+            serde_json::from_value(input).map_err(|e| ToolError::InvalidArguments {
+                tool: "corporate_actions".to_string(),
+                message: format!("schema validation failure: {e}"),
+            })?;
+
+        let inst = args
+            .instrument
+            .as_deref()
+            .map(parse_instrument)
+            .transpose()?;
+        let actions = self
+            .reader
+            .corporate_actions(inst.as_ref(), args.action_type.as_deref(), args.limit)
+            .await
+            .map_err(|e| e.into_tool_error("corporate_actions"))?;
+
+        let capped = args
+            .limit
+            .unwrap_or(DEFAULT_ACTIONS_LIMIT)
+            .min(MAX_ACTIONS_LIMIT);
+        let actions_json: Vec<Value> = actions
+            .into_iter()
+            .take(capped)
+            .map(|a| {
+                serde_json::json!({
+                    "instrument": a.instrument.to_string(),
+                    "action_type": a.action_type,
+                    "ex_date": a.ex_date,
+                    "record_date": a.record_date,
+                    "amount": a.amount.map(|m| m.amount),
+                    "ratio_from": a.ratio_from.map(|q| q.0),
+                    "ratio_to": a.ratio_to.map(|q| q.0),
+                })
+            })
+            .collect();
+
+        Ok(ToolOutput::ok(
+            "corporate_actions",
+            serde_json::json!({
+                "actions": actions_json,
+                "count": actions_json.len(),
             }),
         ))
     }

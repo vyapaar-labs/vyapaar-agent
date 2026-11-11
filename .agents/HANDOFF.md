@@ -4,45 +4,51 @@
 
 ## Phase / Slice Status
 
-- **Plan 0006 Phase 3 — `NewsSearchTool`/`FilingsSearchTool` (implemented 2026-11-12, all gates
-  green)**: new `ContentReader` port (`src/ports/content.rs`: `NewsArticle` — free-form
-  instrument tags, not canonical `InstrumentId`s — and `FilingRecord` mirroring Python
-  `vyapaar_data.domain.filings.Filing` incl. canonical `FilingType` values); tools in
-  `src/content.rs` — `news_search` + `filings_search` (both ReadOnly, `limit` default 20 / cap
-  50); registered in the main `create_read_only_tools`/`register_read_only_tools` bundle →
-  read-only catalogue count **15 → 17** (`test_total_read_only_catalogue_count` bumped). Tests:
-  `MockContentReader` (fail-flag style, matching `MockMarketReader`) + `test_content_tools`
-  (success, query/instrument/type filters, empty-success ≠ error, invalid instrument, honest
-  unavailable, deny-unknown-fields) in `tests/unit_tests.rs` (13 total). Runtime side (in
-  `vyapaar-runtime`): `chat_content.rs::FeedContentReader` honest stubs — upstream check verdict:
-  filings ingestion exists in Python `vyapaar-data` (closed gap 0003) but has no Rust bridge;
-  news has no source anywhere. Gaps filed in the provider repo at implementation time:
-  `vyapaar-data/docs/gaps/0006-news-ingestion.md` + `0007-filings-rust-bridge.md`.
-- **Plan 0006 Phase 2 — `PriceAlertTool` CRUD (implemented 2026-11-11)**: one line —
-  `AlertReader`/`AlertWriter` port + `price_alert_list` (ReadOnly) / `price_alert` (LocalWrite)
-  in a separate `create_alert_tools`/`register_alert_tools` bundle so the all-ReadOnly count
-  stayed pinned; runtime storage = the existing `Profile.alerts` document (`vyapaar-runtime`'s
-  `chat_alerts.rs::ProfileAlertStore`; storage decision in that repo's HANDOFF).
-- **Plan 0006 Phase 1 — `BlockDealsTool` (implemented 2026-11-11)**: one line — see Phase 1 of
-  plan 0006.
+- **Plan 0006 (MCP/chat tool catalog expansion) — complete: Phases 1–4 implemented
+  (2026-11-11/12)**; recorded in `docs/plans/README.md` Implemented table (doc removed from
+  active `docs/plans/` per gap-tracking §4). **Phase 4 (2026-11-12)**: research-verified
+  upstream first (plan §4's mandated re-check, 1 explore subagent) — `vyapaar-market` has
+  contract-reference/Greeks building blocks but no chain reader, and `vyapaar-data`'s
+  corporate-actions reader **does** exist Python-side (the plan's "no reader" assumption was
+  stale; verified against `DuckDbCorporateActionsStore` + `CorporateActionsRepository`). Gaps
+  filed before any tool code: `vyapaar-market/docs/gaps/0001-options-chain-reader.md` (that
+  repo's first), `vyapaar-data/docs/gaps/0008-corporate-actions-rust-bridge.md` +
+  `0009-corporate-actions-ingestion.md`. Landed: `OptionContract`/`OptionsChain`/
+  `CorporateAction` DTOs + `MarketReader::options_chain`/`corporate_actions` port methods;
+  `options_chain` + `corporate_actions` tools in `src/market.rs` (both ReadOnly, main bundle —
+  catalogue **17 → 19**, count test bumped); runtime side `FeedMarketReader` honest stubs +
+  seedable `RuntimeMarketReader` stores. Boy-scout: `BlockDeal`/`BlockDealsInput`/
+  `BlockDealsTool` now re-exported at crate root (Phase 1 omission).
+- **Phase 1–3 recap (2026-11-11/12)** — Phase 1 `BlockDealsTool`, Phase 2 `PriceAlertTool` CRUD
+  (`LocalWrite`, separate alert bundle), Phase 3 `news_search`/`filings_search` via the
+  `ContentReader` port (runtime stubs citing `vyapaar-data` gaps 0006/0007); details in the
+  plans README + git history.
 - **Plans 0001–0005**: complete and merged — see `docs/plans/README.md` Implemented table
   (0004's Phase 4 local-SLM deferral and plan 0005 QLoRA/BLAS notes live there, not here).
 
 ## Immediate Next Step
 
-Plan 0006 Phase 4 stays blocked: first dispatch a narrow research subagent to re-confirm (not
-assume) that `vyapaar-market`/`vyapaar-data` still lack options-chain and corporate-actions
-readers, then file the two gaps named in plan 0006 §1.3 (`vyapaar-market/docs/gaps/` needs
-creating) **before** any `OptionsChainTool`/`CorporateActionsTool` code. Catalogue now 17
-read-only + 2 alert + 3 strategy tools — plan 0006 §2's flat-registry decision stands
-(revisit at ~40).
+Plan 0006 is complete. Catalogue is **19 read-only + 2 alert + 3 strategy** tools; plan 0006
+§2's flat-registry decision stands (revisit at ~40). Future chat-tool breadth continues under
+active plan 0007; the open data blockers for the newest tools are the filed upstream gaps —
+`vyapaar-market/docs/gaps/0001` (chain reader), `vyapaar-data/docs/gaps/0008`+`0009`
+(bridge + ingestion) — alongside the standing 0005/0006/0007 ingestion/bridge gaps.
 
 ## Decisions & Discoveries
 
-- Chat catalogue: **17 read-only tools** (`test_total_read_only_catalogue_count` pins the count)
-  **plus** the 2-tool alert bundle and 3 strategy tools. Content tools went into the main
-  all-ReadOnly bundle (unlike the LocalWrite alert CRUD, which sits outside so its count-pin
-  invariant stays untouched). Plan 0006 §2's flat-registry decision stands (revisit at ~40).
+- Chat catalogue: **19 read-only tools** (`test_total_read_only_catalogue_count` pins the count)
+  **plus** the 2-tool alert bundle and 3 strategy tools. Content (Phase 3) and
+  options-chain/corporate-actions (Phase 4) tools all went into the main all-ReadOnly bundle
+  (unlike the LocalWrite alert CRUD, which sits outside so its count-pin invariant stays
+  untouched). Plan 0006 §2's flat-registry decision stands (revisit at ~40).
+- Phase 4 port semantics: `OptionContract.option_type` is the canonical FNO symbol-grammar
+  string ("CE"/"PE", mirroring `vyapaar-market-finance`'s `OptionType`); `OptionsChain` carries
+  the underlying + snapshot time, contracts ordered by expiry/strike/type; chain cap 500
+  (`MAX_CHAIN_CONTRACTS`, mirroring `MAX_BARS_LIMIT`). `CorporateAction.action_type` is the
+  canonical `"dividend"|"split"|"bonus"|"rights"` set mirroring
+  `vyapaar_data.domain.corporate_actions`' value objects; ratios are exact `Quantity` pairs
+  (`ratio_from`/`ratio_to`), dividends carry `Option<Money>` per-share amounts; list cap 20
+  default / 50 (`DEFAULT_ACTIONS_LIMIT`/`MAX_ACTIONS_LIMIT`, content-tools precedent).
 - Content port semantics: news `instruments` are free-form mention tags (never parsed as
   canonical `InstrumentId` — news text doesn't carry validated scrip refs); filings instruments
   are canonical. `filing_type` is the canonical `FilingType` string set from Python

@@ -14,8 +14,8 @@ pub use alert::{AlertReader, AlertStatus, AlertWriter, PriceAlert};
 pub use content::{ContentReader, FilingRecord, NewsArticle};
 pub use error::{PortError, PortErrorKind};
 pub use market::{
-    InstrumentSearchResult, MacroSeries, MarketBar, MarketHistory, MarketIndicators, MarketQuote,
-    MarketReader,
+    BlockDeal, CorporateAction, InstrumentSearchResult, MacroSeries, MarketBar, MarketHistory,
+    MarketIndicators, MarketQuote, MarketReader, OptionContract, OptionsChain,
 };
 pub use portfolio::{AccountSummary, DateRange, OrderFilter, PortfolioReader};
 pub use snapshot::{SnapshotData, SnapshotNeeds, SnapshotSource};

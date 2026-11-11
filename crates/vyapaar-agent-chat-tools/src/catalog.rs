@@ -7,8 +7,8 @@ use crate::calc::ResearchCalcTool;
 use crate::content::{FilingsSearchTool, NewsSearchTool};
 use crate::lift::{lift_regime, lift_risk, lift_screener};
 use crate::market::{
-    BlockDealsTool, MacroSeriesTool, MarketHistoryTool, MarketIndicatorsTool, MarketQuoteTool,
-    MarketSearchTool,
+    BlockDealsTool, CorporateActionsTool, MacroSeriesTool, MarketHistoryTool, MarketIndicatorsTool,
+    MarketQuoteTool, MarketSearchTool, OptionsChainTool,
 };
 use crate::portfolio::{
     OrdersViewTool, PnlViewTool, PortfolioViewTool, PositionsViewTool, TaxLotsViewTool,
@@ -19,7 +19,7 @@ use crate::ports::market::MarketReader;
 use crate::ports::portfolio::PortfolioReader;
 use crate::ports::snapshot::SnapshotSource;
 
-/// Bundle of all 17 Phase B read-only conversational tools (§6.5).
+/// Bundle of all 19 Phase B read-only conversational tools (§6.5).
 pub fn create_read_only_tools(
     portfolio: Arc<dyn PortfolioReader>,
     market: Arc<dyn MarketReader>,
@@ -27,13 +27,15 @@ pub fn create_read_only_tools(
     snapshots: Option<Arc<dyn SnapshotSource>>,
 ) -> Vec<Arc<dyn ChatTool>> {
     vec![
-        // 1. Market tools (6)
+        // 1. Market tools (8)
         Arc::new(MarketQuoteTool::new(Arc::clone(&market))),
         Arc::new(MarketHistoryTool::new(Arc::clone(&market))),
         Arc::new(MarketIndicatorsTool::new(Arc::clone(&market))),
         Arc::new(MarketSearchTool::new(Arc::clone(&market))),
         Arc::new(MacroSeriesTool::new(Arc::clone(&market))),
         Arc::new(BlockDealsTool::new(Arc::clone(&market))),
+        Arc::new(OptionsChainTool::new(Arc::clone(&market))),
+        Arc::new(CorporateActionsTool::new(Arc::clone(&market))),
         // 2. Portfolio tools (5)
         Arc::new(PortfolioViewTool::new(
             Arc::clone(&portfolio),
@@ -61,7 +63,7 @@ pub fn create_read_only_tools(
     ]
 }
 
-/// Register all 17 Phase B read-only chat tools into a registry (§6.5).
+/// Register all 19 Phase B read-only chat tools into a registry (§6.5).
 pub fn register_read_only_tools(
     registry: &mut ToolRegistry,
     portfolio: Arc<dyn PortfolioReader>,
