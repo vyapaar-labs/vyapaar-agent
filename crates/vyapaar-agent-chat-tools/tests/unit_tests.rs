@@ -15,6 +15,7 @@ use vyapaar_agent_chat_tools::calc::{
 };
 use vyapaar_agent_chat_tools::catalog::register_read_only_tools;
 use vyapaar_agent_chat_tools::ports::alert::{AlertReader, AlertStatus, AlertWriter, PriceAlert};
+use vyapaar_agent_chat_tools::ports::content::{ContentReader, FilingRecord, NewsArticle};
 use vyapaar_agent_chat_tools::ports::error::PortError;
 use vyapaar_agent_chat_tools::ports::market::{
     BlockDeal, InstrumentSearchResult, MacroSeries, MarketBar, MarketHistory, MarketIndicators,
@@ -161,6 +162,70 @@ impl MarketReader for MockMarketReader {
             Price(dec!(2750.0)),
             Price(dec!(2500.0)),
         ))
+    }
+}
+
+struct MockContentReader {
+    fail_content: bool,
+}
+
+#[async_trait]
+impl ContentReader for MockContentReader {
+    async fn news_search(
+        &self,
+        query: Option<&str>,
+        instrument: Option<&str>,
+        limit: Option<usize>,
+    ) -> Result<Vec<NewsArticle>, PortError> {
+        if self.fail_content {
+            return Err(PortError::unavailable("news content feed offline"));
+        }
+        let articles = vec![NewsArticle {
+            id: "news_001".to_string(),
+            title: "Reliance quarterly results beat estimates".to_string(),
+            source: "Economic Times".to_string(),
+            url: Some("https://example.com/news_001".to_string()),
+            published_at: Utc::now(),
+            summary: Some("Q2 results above street expectations".to_string()),
+            instruments: vec!["NSE:RELIANCE".to_string()],
+        }];
+        let take = limit.unwrap_or(articles.len());
+        let articles: Vec<NewsArticle> = articles
+            .into_iter()
+            .filter(|a| query.is_none_or(|q| a.title.to_lowercase().contains(&q.to_lowercase())))
+            .filter(|a| {
+                instrument
+                    .is_none_or(|i| a.instruments.iter().any(|tag| tag.eq_ignore_ascii_case(i)))
+            })
+            .take(take)
+            .collect();
+        Ok(articles)
+    }
+
+    async fn filings(
+        &self,
+        instrument: Option<&InstrumentId>,
+        filing_type: Option<&str>,
+        _limit: Option<usize>,
+    ) -> Result<Vec<FilingRecord>, PortError> {
+        if self.fail_content {
+            return Err(PortError::unavailable("filings source offline"));
+        }
+        let inst = instrument
+            .cloned()
+            .unwrap_or_else(|| InstrumentId::new(Exchange::Nse, "RELIANCE"));
+        let filings = vec![FilingRecord {
+            instrument: inst,
+            filing_date: Utc::now(),
+            filing_type: "quarterly_result".to_string(),
+            title: "Quarterly results filing".to_string(),
+            source_url: Some("https://example.com/filing".to_string()),
+        }];
+        let filings: Vec<FilingRecord> = filings
+            .into_iter()
+            .filter(|f| filing_type.is_none_or(|t| f.filing_type == t))
+            .collect();
+        Ok(filings)
     }
 }
 
@@ -473,7 +538,15 @@ async fn test_market_tools() {
     let portfolio = Arc::new(MockPortfolioReader);
     let snapshot = Arc::new(MockSnapshotSource);
 
-    register_read_only_tools(&mut registry, portfolio, market, Some(snapshot));
+    register_read_only_tools(
+        &mut registry,
+        portfolio,
+        market,
+        Arc::new(MockContentReader {
+            fail_content: false,
+        }),
+        Some(snapshot),
+    );
 
     // 1. market_quote
     let quote_tool = registry
@@ -547,7 +620,15 @@ async fn test_market_tools() {
 async fn test_block_deals_tools() {
     let market = Arc::new(MockMarketReader { fail_quotes: false });
     let mut registry = ToolRegistry::new();
-    register_read_only_tools(&mut registry, Arc::new(MockPortfolioReader), market, None);
+    register_read_only_tools(
+        &mut registry,
+        Arc::new(MockPortfolioReader),
+        market,
+        Arc::new(MockContentReader {
+            fail_content: false,
+        }),
+        None,
+    );
 
     // 1. block_deals — success, no filters (defaults to latest trading day).
     let tool = registry.get("block_deals").expect("block_deals registered");
@@ -586,6 +667,9 @@ async fn test_block_deals_tools() {
         &mut fail_registry,
         Arc::new(MockPortfolioReader),
         failing,
+        Arc::new(MockContentReader {
+            fail_content: false,
+        }),
         None,
     );
     let err = fail_registry
@@ -597,6 +681,147 @@ async fn test_block_deals_tools() {
     assert!(
         matches!(err, ToolError::Execution(..)),
         "unavailable port must surface as ToolError::Execution, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_content_tools() {
+    let content = Arc::new(MockContentReader {
+        fail_content: false,
+    });
+    let mut registry = ToolRegistry::new();
+    register_read_only_tools(
+        &mut registry,
+        Arc::new(MockPortfolioReader),
+        Arc::new(MockMarketReader { fail_quotes: false }),
+        content,
+        None,
+    );
+
+    // 1. news_search — both tools registered and read-only.
+    let news = registry.get("news_search").expect("news_search registered");
+    assert_eq!(news.traits().risk, ToolRisk::ReadOnly);
+    let filings = registry
+        .get("filings_search")
+        .expect("filings_search registered");
+    assert_eq!(filings.traits().risk, ToolRisk::ReadOnly);
+
+    // 2. news_search — success, no filters.
+    let out = news
+        .execute(serde_json::json!({}), dummy_tool_context())
+        .await
+        .unwrap();
+    assert!(out.ok);
+    assert_eq!(out.payload["count"], 1);
+    assert_eq!(out.payload["articles"][0]["id"], "news_001");
+    assert_eq!(
+        out.payload["articles"][0]["title"],
+        "Reliance quarterly results beat estimates"
+    );
+    assert_eq!(out.payload["articles"][0]["instruments"][0], "NSE:RELIANCE");
+    assert_eq!(out.payload["articles"][0]["source"], "Economic Times");
+    assert!(out.payload["articles"][0]["published_at"].is_string());
+
+    // 3. news_search — query + instrument-mention filters parsed through to the port.
+    let out = news
+        .execute(
+            serde_json::json!({
+                "query": "results",
+                "instrument": "NSE:RELIANCE",
+                "limit": 5
+            }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert!(out.ok);
+    assert_eq!(out.payload["count"], 1);
+
+    // 4. news_search — non-matching query yields an empty result, not an error.
+    let out = news
+        .execute(
+            serde_json::json!({ "query": "unrelated" }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert!(out.ok);
+    assert_eq!(out.payload["count"], 0);
+
+    // 5. filings_search — success with type filter.
+    let out = filings
+        .execute(
+            serde_json::json!({
+                "instrument": "NSE:TCS",
+                "filing_type": "quarterly_result"
+            }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert!(out.ok);
+    assert_eq!(out.payload["count"], 1);
+    assert_eq!(out.payload["filings"][0]["instrument"], "NSE:TCS");
+    assert_eq!(out.payload["filings"][0]["filing_type"], "quarterly_result");
+    assert!(out.payload["filings"][0]["filing_date"].is_string());
+
+    // 6. filings_search — non-matching type filter yields an empty result, not an error.
+    let out = filings
+        .execute(
+            serde_json::json!({ "filing_type": "insider_trade" }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert!(out.ok);
+    assert_eq!(out.payload["count"], 0);
+
+    // 7. filings_search — unknown exchange rejected as invalid arguments.
+    let err = filings
+        .execute(
+            serde_json::json!({ "instrument": "BOGUS:RELIANCE" }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ToolError::InvalidArguments { .. }),
+        "unknown exchange must surface as ToolError::InvalidArguments, got {err:?}"
+    );
+
+    // 8. Content tools — honest unavailability when no content source exists.
+    let failing = Arc::new(MockContentReader { fail_content: true });
+    let mut fail_registry = ToolRegistry::new();
+    register_read_only_tools(
+        &mut fail_registry,
+        Arc::new(MockPortfolioReader),
+        Arc::new(MockMarketReader { fail_quotes: false }),
+        failing,
+        None,
+    );
+    for name in ["news_search", "filings_search"] {
+        let err = fail_registry
+            .get(name)
+            .unwrap()
+            .execute(serde_json::json!({}), dummy_tool_context())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ToolError::Execution(..)),
+            "unavailable content port must surface as ToolError::Execution, got {err:?}"
+        );
+    }
+
+    // 9. news_search — deny_unknown_fields rejects unexpected arguments.
+    let err = registry
+        .get("news_search")
+        .unwrap()
+        .execute(serde_json::json!({ "bogus": true }), dummy_tool_context())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ToolError::InvalidArguments { .. }),
+        "unknown field must be rejected, got {err:?}"
     );
 }
 
@@ -779,9 +1004,12 @@ async fn test_alert_tools() {
 async fn test_portfolio_tools() {
     let market = Arc::new(MockMarketReader { fail_quotes: false });
     let portfolio = Arc::new(MockPortfolioReader);
+    let content = Arc::new(MockContentReader {
+        fail_content: false,
+    });
     let mut registry = ToolRegistry::new();
 
-    register_read_only_tools(&mut registry, portfolio, market, None);
+    register_read_only_tools(&mut registry, portfolio, market, content, None);
 
     // 1. portfolio_view
     let pv_tool = registry
@@ -872,7 +1100,10 @@ async fn test_portfolio_graceful_degradation_without_quotes() {
     let portfolio = Arc::new(MockPortfolioReader);
     let mut registry = ToolRegistry::new();
 
-    register_read_only_tools(&mut registry, portfolio, market, None);
+    let content = Arc::new(MockContentReader {
+        fail_content: false,
+    });
+    register_read_only_tools(&mut registry, portfolio, market, content, None);
 
     let pv_tool = registry.get("portfolio_view").unwrap();
     let out = pv_tool
@@ -898,7 +1129,15 @@ async fn test_lifted_pure_tools() {
     let snapshot = Arc::new(MockSnapshotSource);
     let mut registry = ToolRegistry::new();
 
-    register_read_only_tools(&mut registry, portfolio, market, Some(snapshot));
+    register_read_only_tools(
+        &mut registry,
+        portfolio,
+        market,
+        Arc::new(MockContentReader {
+            fail_content: false,
+        }),
+        Some(snapshot),
+    );
 
     // 1. screener_scan
     let screener = registry.get("screener_scan").expect("screener_scan lifted");
@@ -944,11 +1183,14 @@ async fn test_lifted_pure_tools() {
 async fn test_total_read_only_catalogue_count() {
     let market = Arc::new(MockMarketReader { fail_quotes: false });
     let portfolio = Arc::new(MockPortfolioReader);
+    let content = Arc::new(MockContentReader {
+        fail_content: false,
+    });
     let mut registry = ToolRegistry::new();
 
-    register_read_only_tools(&mut registry, portfolio, market, None);
+    register_read_only_tools(&mut registry, portfolio, market, content, None);
     let specs = registry.specs();
-    assert_eq!(specs.len(), 15);
+    assert_eq!(specs.len(), 17);
 
     for spec in &specs {
         let tool = registry.get(&spec.name).unwrap();

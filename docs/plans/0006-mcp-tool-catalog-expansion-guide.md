@@ -6,7 +6,15 @@
 port (`ports/alert.rs`), `price_alert_list` + `price_alert` tools (`alert.rs`,
 `create_alert_tools`/`register_alert_tools` bundle — read-only catalogue count stays 15), runtime
 storage = the existing `Profile.alerts` document (`vyapaar-runtime`'s
-`chat_alerts.rs::ProfileAlertStore`; see Phase 2 below for the decision). Phases 3–4 unscheduled.
+`chat_alerts.rs::ProfileAlertStore`; see Phase 2 below for the decision). Phase 3
+(`NewsSearchTool`/`FilingsSearchTool`) implemented 2026-11-12: new `ContentReader` port
+(`ports/content.rs`, `NewsArticle`/`FilingRecord` DTOs), `news_search` + `filings_search` tools
+(`content.rs`, read-only catalogue count 15 → 17), runtime side
+`vyapaar-runtime-api-rest/src/chat_content.rs::FeedContentReader` — both methods answer
+`PortError::unavailable` citing the two gaps filed at implementation time:
+`vyapaar-data/docs/gaps/0006-news-ingestion.md` (news: no source anywhere) and
+`vyapaar-data/docs/gaps/0007-filings-rust-bridge.md` (filings: ingested in Python, no
+Rust-consumer bridge). Phase 4 unscheduled (blocked — see §4).
 
 ---
 
@@ -249,12 +257,23 @@ server change). The runtime side is `vyapaar-runtime-api-rest/src/chat_alerts.rs
 decimal-string `price`, `createdAt` "yyyy-mm-dd", `triggeredAt` optional ISO string), and the
 ui-web transition rule that a `Triggered` alert is never flipped by enable/disable.
 
-**Phase 3 — `NewsSearchTool` / `FilingsSearchTool`**: modeled on longbridge's Content/Search (news
-list/detail/search) and Fincept's "News and alternative data" toolset. Needs
-`vyapaar-data/docs/gaps/0003-calendar-stubbed-data.md` and any filings-reader precedent
-(`vyapaar_data/service/filings_reader.py`, closed gap 0003 per `vyapaar-data/docs/gaps/README.md`)
-checked first — filings ingestion may already exist; this phase may be pure tool-layer wiring with
-no new upstream gap, similar to Phase 1's Phases 1–3.
+**Phase 3 — `NewsSearchTool` / `FilingsSearchTool`** — **implemented 2026-11-12**: modeled on
+longbridge's Content/Search (news list/detail/search) and Fincept's "News and alternative data"
+toolset. Upstream check performed first (as directed): filings ingestion **exists** in Python
+`vyapaar-data` (`vyapaar_data/service/filings_reader.py::LakehouseFilingsReader`, closed gap
+0003) but has **no Rust-consumer bridge**, and news ingestion **does not exist anywhere** — so
+neither half is "pure tool-layer wiring" in the Phase 1 sense; both runtime-side methods are
+honest `PortError::unavailable` stubs. Landed: new `ContentReader` port
+(`crates/vyapaar-agent-chat-tools/src/ports/content.rs`: `NewsArticle`, `FilingRecord` — filings
+mirror the Python `Filing` shape incl. the canonical `FilingType` values; news instrument mentions
+are free-form tags, not canonical `InstrumentId`s); `news_search`/`filings_search` tools
+(`src/content.rs`, both `ToolRisk::ReadOnly`, 20-default/50-cap `limit`); both added to
+`create_read_only_tools`/`register_read_only_tools` (read-only catalogue count **15 → 17**, count
+test updated); runtime side `vyapaar-runtime-api-rest/src/chat_content.rs::FeedContentReader`
+stubs citing the two gaps filed at implementation time per §1.3/`.agents/rules/gap-tracking.md`:
+`vyapaar-data/docs/gaps/0006-news-ingestion.md` and
+`vyapaar-data/docs/gaps/0007-filings-rust-bridge.md`, tracked as item 7 of
+`vyapaar-runtime/docs/gaps/0007-chat-market-reader-approximations-and-missing-sources.md`.
 
 **Phase 4 (blocked — file gaps first)** — `OptionsChainTool`, `CorporateActionsTool`: do not
 start implementation. First dispatch a narrow research subagent to confirm (not assume) that

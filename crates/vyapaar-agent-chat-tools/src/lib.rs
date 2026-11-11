@@ -2,9 +2,9 @@
 //!
 //! Conversational read-only tools and domain read ports for `vyapaar-agent` (§4, §6).
 //!
-//! Owns the `PortfolioReader`, `MarketReader`, and `SnapshotSource` ports, the lifted
-//! pure tools via [`PureToolAdapter`], and model-facing tools for market, portfolio,
-//! and research calculations.
+//! Owns the `PortfolioReader`, `MarketReader`, `ContentReader`, and `SnapshotSource` ports, the
+//! lifted pure tools via [`PureToolAdapter`], and model-facing tools for market, portfolio,
+//! content, and research calculations.
 //!
 //! Architectural invariants:
 //! - **Pure advisory (NoFX)**: chat tools never place orders or produce `Decision`s (§4.3).
@@ -14,6 +14,7 @@
 pub mod alert;
 pub mod calc;
 pub mod catalog;
+pub mod content;
 pub mod lift;
 pub mod market;
 pub mod portfolio;
@@ -29,6 +30,7 @@ pub use calc::{
 pub use catalog::{
     create_alert_tools, create_read_only_tools, register_alert_tools, register_read_only_tools,
 };
+pub use content::{FilingsSearchInput, FilingsSearchTool, NewsSearchInput, NewsSearchTool};
 pub use lift::{PureToolAdapter, lift_regime, lift_risk, lift_screener};
 pub use market::{
     MacroSeriesInput, MacroSeriesTool, MarketHistoryInput, MarketHistoryTool,
@@ -40,10 +42,10 @@ pub use portfolio::{
     PortfolioViewTool, PositionsViewInput, PositionsViewTool, TaxLotsViewInput, TaxLotsViewTool,
 };
 pub use ports::{
-    AccountSummary, AlertReader, AlertStatus, AlertWriter, DateRange, InstrumentSearchResult,
-    MacroSeries, MarketBar, MarketHistory, MarketIndicators, MarketQuote, MarketReader,
-    OrderFilter, PortError, PortErrorKind, PortfolioReader, PriceAlert, SnapshotData,
-    SnapshotNeeds, SnapshotSource,
+    AccountSummary, AlertReader, AlertStatus, AlertWriter, ContentReader, DateRange, FilingRecord,
+    InstrumentSearchResult, MacroSeries, MarketBar, MarketHistory, MarketIndicators, MarketQuote,
+    MarketReader, NewsArticle, OrderFilter, PortError, PortErrorKind, PortfolioReader, PriceAlert,
+    SnapshotData, SnapshotNeeds, SnapshotSource,
 };
 pub mod strategy;
 

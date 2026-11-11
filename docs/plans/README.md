@@ -12,7 +12,7 @@ Per workspace rule `.agents/rules/gap-tracking.md`:
 |---|-------|--------------|--------|
 | [0002](0002-tdd-cleanup-and-chat-tools.md) | TDD Cleanup & `vyapaar-agent-chat-tools` Crate | `vyapaar-agent-core`, `vyapaar-agent-chat-tools` | Open — tracks gaps 0001, 0002 |
 | [0003](0003-persistent-memory-and-mcp-client.md) | Persistent Memory, MCP Client Bridge & Phase E | `vyapaar-agent-core`, `vyapaar-agent-prompt`, `vyapaar-agent-mcp`, `vyapaar-agent-report`, `vyapaar-agent-research` | Open — tracks gaps 0003–0007 |
-| [0006](0006-mcp-tool-catalog-expansion-guide.md) | MCP/chat tool catalog expansion guide (benchmarked against longbridge-mcp, Fincept, jesse-mcp) | `vyapaar-agent-chat-tools` | In progress — Phase 1 implemented (`BlockDealsTool`, 15 read-only tools); Phases 2–4 unscheduled |
+| [0006](0006-mcp-tool-catalog-expansion-guide.md) | MCP/chat tool catalog expansion guide (benchmarked against longbridge-mcp, Fincept, jesse-mcp) | `vyapaar-agent-chat-tools` | In progress — Phases 1–2 implemented (see plan header); Phase 3 implemented 2026-11-12 (`ContentReader` port, `news_search`/`filings_search` tools, read-only catalogue 17; runtime stubs citing `vyapaar-data` gaps 0006/0007); Phase 4 blocked on upstream gaps |
 
 ## Implemented Plans
 
