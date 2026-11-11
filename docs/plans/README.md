@@ -12,6 +12,7 @@ Per workspace rule `.agents/rules/gap-tracking.md`:
 |---|-------|--------------|--------|
 | [0002](0002-tdd-cleanup-and-chat-tools.md) | TDD Cleanup & `vyapaar-agent-chat-tools` Crate | `vyapaar-agent-core`, `vyapaar-agent-chat-tools` | Open — tracks gaps 0001, 0002 |
 | [0003](0003-persistent-memory-and-mcp-client.md) | Persistent Memory, MCP Client Bridge & Phase E | `vyapaar-agent-core`, `vyapaar-agent-prompt`, `vyapaar-agent-mcp`, `vyapaar-agent-report`, `vyapaar-agent-research` | Open — tracks gaps 0003–0007 |
+| [0006](0006-mcp-tool-catalog-expansion-guide.md) | MCP/chat tool catalog expansion guide (benchmarked against longbridge-mcp, Fincept, jesse-mcp) | `vyapaar-agent-chat-tools` | Proposed — Phase 1 is `vyapaar-runtime/docs/plans/0004`; Phases 2–4 unscheduled |
 
 ## Implemented Plans
 
