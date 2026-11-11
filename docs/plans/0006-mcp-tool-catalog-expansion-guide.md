@@ -103,6 +103,42 @@ by this planning pass** — this plan only flags them:
   gaps table before filing a new one here — this may already be partially covered by gap 0001 by
   the time Phase 2b starts.
 
+### 1.4 NoFX `mcp/` directory cross-check
+
+`AGENTS.md` §5.5 attributes this repo's `ToolRisk` design (and its untrusted-AI/decision-grammar/
+risk-clamping/replayability philosophy) to NoFX. The `mcp/` directory on `NoFxAiOS/nofx`'s `dev`
+branch was fetched and read directly (via `gh api repos/NoFxAiOS/nofx/contents/mcp?ref=dev` and the
+raw file contents) to check whether that philosophy has a concrete counterpart there worth
+adopting. It does not — and the reason is that `mcp/` is not what §5.5 is actually describing:
+
+- **What `mcp/` actually is**: a Go SDK for calling multiple LLM providers through one client
+  interface (`AIClient`/`ClientHooks` in `interface.go`/`hooks.go`), with a provider registry
+  (`registry.go`, `providers.go` — OpenAI, Claude, Gemini, DeepSeek, Qwen, Grok, Kimi, MiniMax, each
+  a file under `mcp/provider/`), context-window token-budget truncation (`context_guard.go`), and an
+  x402/Claw402 on-chain micropayment layer for metering API calls (`mcp/payment/`: `x402.go`,
+  `claw402.go`, `gasless.go`, `receipt.go`). This is the same role `vyapaar-agent-llm`'s OmniRoute
+  (implemented plan 0004: `OpenAiCompatibleProvider`, `FreeTierPolicy`, provider injection) already
+  plays in this repo — a multi-provider LLM client layer, not a tool-catalog/risk-tiering system.
+- **No tool catalog, no risk tiers, no decision-grammar validation, no tool-call audit** exist
+  anywhere in `mcp/`. There is no list of callable trading/account tools (unlike longbridge-mcp or
+  jesse-mcp), no permission/risk enum comparable to `ToolRisk`, and no enforcement point analogous
+  to `vyapaar_core::Decision`'s `#[serde(deny_unknown_fields)]` closed grammar. Logging is a plain
+  `Logger` interface (`logger.go`: `Debugf`/`Infof`/`Warnf`/`Errorf`) — no hash-chained audit record
+  comparable to this repo's own `LlmAuditRecord` (implemented plan 0004/0005), let alone a
+  tool-*call*-level one.
+- **Where the §5.5 philosophy actually lives in NoFX**: the root README describes two execution
+  modes — "Frontier" (generate a plan, "review and trade... explicitly approve execution" — a
+  human-in-the-loop gate, not an automated clamp) and "Autopilot" (continuous unattended strategy
+  execution). Neither is implemented in `mcp/`; the untrusted-AI/risk-clamping language in
+  `AGENTS.md` §5.5 is this repo's own paraphrase of NoFX's overall human-approval-gated trading
+  model, not a description of anything in the `mcp/` source tree specifically.
+
+**Conclusion: no new pattern to adopt.** This cross-check confirms `vyapaar-agent-chat-tools`'s
+existing `ToolRisk` design and `vyapaar_core::Decision` grammar already go further toward
+automated, non-bypassable safety than anything in NoFX's `mcp/` code — there is nothing in that
+directory to port into the implementation recipe (§3) or the phased rollout (§4). No change to
+either section follows from this reference.
+
 ## 2. Discoverability pattern decision
 
 **Decision: keep `vyapaar-agent-chat-tools` as a flat `ToolRegistry` through this plan's full
