@@ -1,6 +1,12 @@
 # 0006 — MCP/chat tool catalog expansion guide
 
-**Status**: Proposed
+**Status**: In progress — Phase 1 (`BlockDealsTool`) implemented 2026-11-11 via
+`vyapaar-runtime/docs/plans/0004` Phases 1–3; catalogue now 15 read-only tools. Phase 2
+(`PriceAlertTool` CRUD, `ToolRisk::LocalWrite`) implemented 2026-11-11: `AlertReader`/`AlertWriter`
+port (`ports/alert.rs`), `price_alert_list` + `price_alert` tools (`alert.rs`,
+`create_alert_tools`/`register_alert_tools` bundle — read-only catalogue count stays 15), runtime
+storage = the existing `Profile.alerts` document (`vyapaar-runtime`'s
+`chat_alerts.rs::ProfileAlertStore`; see Phase 2 below for the decision). Phases 3–4 unscheduled.
 
 ---
 
@@ -227,14 +233,21 @@ binding cap), verify each phase's `cargo test` pass before starting the next.
 `.../src/market.rs`, `.../src/catalog.rs`, `.../tests/unit_tests.rs`;
 `vyapaar-runtime/crates/vyapaar-runtime-api-rest/src/chat_market.rs`.
 
-**Phase 2 — `PriceAlertTool` (CRUD, `ToolRisk::LocalWrite`)**: modeled on longbridge's Alert
-category (5 ops: add/delete/enable/disable/list) and this repo's own `ToolRisk::LocalWrite` doc
-comment ("watchlists, monitors"). New port `AlertReader`/`AlertWriter` in
-`vyapaar-agent-chat-tools/src/ports/alert.rs`; tool(s) in a new `src/alert.rs`; needs a storage
-decision in `vyapaar-runtime` (likely alongside `AppState`'s existing `profiles`/`portfolios`
-flat-file stores, per `vyapaar-runtime/docs/gaps/0004-*.md`'s profile-schema precedent — check
-that file first, it may already define a `Watchlist`/`RiskProfile` shape this should reuse rather
-than duplicate).
+**Phase 2 — `PriceAlertTool` (CRUD, `ToolRisk::LocalWrite`)** — **implemented 2026-11-11**:
+modeled on longbridge's Alert category (5 ops: add/delete/enable/disable/list) and this repo's own
+`ToolRisk::LocalWrite` doc comment ("watchlists, monitors"). New port `AlertReader`/`AlertWriter`
+in `vyapaar-agent-chat-tools/src/ports/alert.rs`; tools in `src/alert.rs`
+(`price_alert_list`, ReadOnly + `price_alert`, LocalWrite — two tools so the pure list never
+prompts for confirmation). **Storage decision (made in `vyapaar-runtime`, checked against
+`vyapaar-runtime/docs/gaps/0004-*.md` as directed)**: no new store — alerts live in the existing
+opaque `Profile.alerts` JSON array that `vyapaar-ui-web`'s `alerts-store.ts` already syncs via the
+`/profile` routes (gap 0004 explicitly closed `AlertMeta[]` against `Profile.alerts` with no
+server change). The runtime side is `vyapaar-runtime-api-rest/src/chat_alerts.rs`
+(`ProfileAlertStore`): one atomic `ProfileStore::update` read-modify-write per change,
+`DEFAULT_USER_ID`'s document (chat WS has no bearer identity yet — per
+`vyapaar-runtime/docs/gaps/0006`), DTO mirroring ui-web's `AlertMeta` exactly (camelCase,
+decimal-string `price`, `createdAt` "yyyy-mm-dd", `triggeredAt` optional ISO string), and the
+ui-web transition rule that a `Triggered` alert is never flipped by enable/disable.
 
 **Phase 3 — `NewsSearchTool` / `FilingsSearchTool`**: modeled on longbridge's Content/Search (news
 list/detail/search) and Fincept's "News and alternative data" toolset. Needs

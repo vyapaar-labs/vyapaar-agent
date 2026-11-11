@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use tokio::sync::mpsc;
@@ -14,15 +14,18 @@ use vyapaar_agent_chat_tools::calc::{
     ResearchCalcTool, ReturnMetricsArgs, StatutoryCostsArgs, TradeSide,
 };
 use vyapaar_agent_chat_tools::catalog::register_read_only_tools;
+use vyapaar_agent_chat_tools::ports::alert::{AlertReader, AlertStatus, AlertWriter, PriceAlert};
 use vyapaar_agent_chat_tools::ports::error::PortError;
 use vyapaar_agent_chat_tools::ports::market::{
-    InstrumentSearchResult, MacroSeries, MarketBar, MarketHistory, MarketIndicators, MarketQuote,
-    MarketReader,
+    BlockDeal, InstrumentSearchResult, MacroSeries, MarketBar, MarketHistory, MarketIndicators,
+    MarketQuote, MarketReader,
 };
 use vyapaar_agent_chat_tools::ports::portfolio::{
     AccountSummary, DateRange, OrderFilter, PortfolioReader,
 };
 use vyapaar_agent_chat_tools::ports::snapshot::{SnapshotData, SnapshotNeeds, SnapshotSource};
+use vyapaar_agent_chat_tools::{create_alert_tools, register_alert_tools};
+use vyapaar_agent_core::ToolError;
 use vyapaar_core::{
     AccountId, AlgoId, ClientOrderId, Exchange, InstrumentId, Money, OrderSide, OrderStatus,
     OrderType, PositionSide, Price, PriceBand, Quantity, TimeInForce,
@@ -125,6 +128,31 @@ impl MarketReader for MockMarketReader {
                 (Utc::now(), dec!(5.1)),
             ],
         })
+    }
+
+    async fn block_deals(
+        &self,
+        instrument: Option<&InstrumentId>,
+        date: Option<DateTime<Utc>>,
+    ) -> Result<Vec<BlockDeal>, PortError> {
+        if self.fail_quotes {
+            return Err(PortError::unavailable(
+                "block/bulk deal disclosures are not yet ingested",
+            ));
+        }
+        let inst = instrument
+            .cloned()
+            .unwrap_or_else(|| InstrumentId::new(Exchange::Nse, "RELIANCE"));
+        Ok(vec![BlockDeal {
+            instrument: inst,
+            exchange: "NSE".to_string(),
+            client_name: "MORGAN STANLEY ASIA SINGAPORE PTE".to_string(),
+            side: "buy".to_string(),
+            category: "block".to_string(),
+            quantity: Quantity(dec!(500000.0)),
+            price: Price(dec!(2500.0)),
+            trade_date: date.unwrap_or_else(Utc::now),
+        }])
     }
 
     async fn price_band(&self, _instrument: &InstrumentId) -> Result<PriceBand, PortError> {
@@ -243,6 +271,73 @@ impl SnapshotSource for MockSnapshotSource {
             regime: Some("trending".to_string()),
             risk_metrics: HashMap::new(),
         })
+    }
+}
+
+/// In-memory alert store implementing both alert port traits over one shared `Vec` — the same
+/// contract the runtime's profile-backed store implements (duplicate ids rejected; a
+/// `Triggered` alert is never flipped by enable/disable).
+struct MockAlertStore {
+    alerts: std::sync::Mutex<Vec<PriceAlert>>,
+}
+
+impl MockAlertStore {
+    fn new() -> Self {
+        Self {
+            alerts: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl AlertReader for MockAlertStore {
+    async fn list_alerts(&self, workspace: Option<&str>) -> Result<Vec<PriceAlert>, PortError> {
+        let all = self.alerts.lock().unwrap().clone();
+        Ok(match workspace {
+            Some(w) => all.into_iter().filter(|a| a.workspace_id == w).collect(),
+            None => all,
+        })
+    }
+}
+
+#[async_trait]
+impl AlertWriter for MockAlertStore {
+    async fn add_alert(&self, alert: PriceAlert) -> Result<PriceAlert, PortError> {
+        let mut alerts = self.alerts.lock().unwrap();
+        if alerts.iter().any(|a| a.id == alert.id) {
+            return Err(PortError::invalid_argument(format!(
+                "an alert with id `{}` already exists",
+                alert.id
+            )));
+        }
+        alerts.push(alert.clone());
+        Ok(alert)
+    }
+
+    async fn set_alert_status(
+        &self,
+        id: &str,
+        status: AlertStatus,
+    ) -> Result<Option<PriceAlert>, PortError> {
+        let mut alerts = self.alerts.lock().unwrap();
+        Ok(match alerts.iter_mut().find(|a| a.id == id) {
+            Some(alert) => {
+                if alert.status != AlertStatus::Triggered {
+                    alert.status = status;
+                }
+                Some(alert.clone())
+            }
+            None => None,
+        })
+    }
+
+    async fn delete_alert(&self, id: &str) -> Result<Option<PriceAlert>, PortError> {
+        let mut alerts = self.alerts.lock().unwrap();
+        let removed = alerts
+            .iter()
+            .position(|a| a.id == id)
+            .map(|i| alerts.remove(i));
+        Ok(removed)
     }
 }
 
@@ -449,6 +544,238 @@ async fn test_market_tools() {
 }
 
 #[tokio::test]
+async fn test_block_deals_tools() {
+    let market = Arc::new(MockMarketReader { fail_quotes: false });
+    let mut registry = ToolRegistry::new();
+    register_read_only_tools(&mut registry, Arc::new(MockPortfolioReader), market, None);
+
+    // 1. block_deals — success, no filters (defaults to latest trading day).
+    let tool = registry.get("block_deals").expect("block_deals registered");
+    assert_eq!(tool.traits().risk, ToolRisk::ReadOnly);
+    let out = tool
+        .execute(serde_json::json!({}), dummy_tool_context())
+        .await
+        .unwrap();
+    assert!(out.ok);
+    assert_eq!(out.payload["count"], 1);
+    assert_eq!(out.payload["deals"][0]["instrument"], "NSE:RELIANCE");
+    assert_eq!(out.payload["deals"][0]["side"], "buy");
+    assert_eq!(out.payload["deals"][0]["category"], "block");
+    assert_eq!(parse_dec(&out.payload["deals"][0]["price"]), 2500.0);
+    assert_eq!(parse_dec(&out.payload["deals"][0]["quantity"]), 500000.0);
+
+    // 2. block_deals — instrument + date filters parsed through to the port.
+    let out = tool
+        .execute(
+            serde_json::json!({
+                "instrument": "NSE:TCS",
+                "date": "2026-11-10T10:00:00Z"
+            }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert!(out.ok);
+    assert_eq!(out.payload["deals"][0]["instrument"], "NSE:TCS");
+    assert!(out.payload["deals"][0]["trade_date"].is_string());
+
+    // 3. block_deals — honest unavailability when no disclosure source exists.
+    let failing = Arc::new(MockMarketReader { fail_quotes: true });
+    let mut fail_registry = ToolRegistry::new();
+    register_read_only_tools(
+        &mut fail_registry,
+        Arc::new(MockPortfolioReader),
+        failing,
+        None,
+    );
+    let err = fail_registry
+        .get("block_deals")
+        .unwrap()
+        .execute(serde_json::json!({}), dummy_tool_context())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ToolError::Execution(..)),
+        "unavailable port must surface as ToolError::Execution, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_alert_tools() {
+    let store = Arc::new(MockAlertStore::new());
+    let reader: Arc<dyn AlertReader> = store.clone();
+    let writer: Arc<dyn AlertWriter> = store.clone();
+    let mut registry = ToolRegistry::new();
+    register_alert_tools(&mut registry, reader, writer);
+
+    // 1. Risk tiers: the list tool is read-only, the CRUD tool is LocalWrite.
+    let list = registry
+        .get("price_alert_list")
+        .expect("price_alert_list registered");
+    assert_eq!(list.traits().risk, ToolRisk::ReadOnly);
+    let crud = registry.get("price_alert").expect("price_alert registered");
+    assert_eq!(crud.traits().risk, ToolRisk::LocalWrite);
+
+    // 2. list on an empty store → count 0.
+    let out = list
+        .execute(serde_json::json!({}), dummy_tool_context())
+        .await
+        .unwrap();
+    assert!(out.ok);
+    assert_eq!(out.payload["count"], 0);
+
+    // 3. add → active alert with a minted id, decimal-string price, default workspace.
+    let out = crud
+        .execute(
+            serde_json::json!({
+                "operation": "add",
+                "instrument": "NSE:RELIANCE",
+                "price": "2500.50"
+            }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert!(out.ok);
+    let alert = &out.payload["alert"];
+    let added_id = alert["id"].as_str().unwrap().to_string();
+    assert!(added_id.starts_with("al_"));
+    assert_eq!(alert["instrumentId"], "NSE:RELIANCE");
+    assert_eq!(alert["price"], "2500.50");
+    assert_eq!(alert["status"], "active");
+    assert_eq!(alert["workspaceId"], "default");
+    assert_eq!(alert["triggeredAt"], serde_json::Value::Null);
+
+    // 4. list sees it; instrument + status filters and workspace scoping work.
+    let out = list
+        .execute(serde_json::json!({}), dummy_tool_context())
+        .await
+        .unwrap();
+    assert_eq!(out.payload["count"], 1);
+    let out = list
+        .execute(
+            serde_json::json!({ "instrument": "RELIANCE" }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.payload["count"], 1);
+    let out = list
+        .execute(
+            serde_json::json!({ "instrument": "NSE:TCS" }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.payload["count"], 0);
+    let out = list
+        .execute(
+            serde_json::json!({ "status": "active" }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.payload["count"], 1);
+    let out = list
+        .execute(
+            serde_json::json!({ "workspace": "other" }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.payload["count"], 0);
+
+    // 5. disable → paused; enable → active.
+    let out = crud
+        .execute(
+            serde_json::json!({ "operation": "disable", "id": added_id }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.payload["alert"]["status"], "paused");
+    let out = crud
+        .execute(
+            serde_json::json!({ "operation": "enable", "id": added_id }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.payload["alert"]["status"], "active");
+
+    // 6. enable/disable on a triggered alert is a no-op (port contract, ui-web parity).
+    store.alerts.lock().unwrap()[0].status = AlertStatus::Triggered;
+    let out = crud
+        .execute(
+            serde_json::json!({ "operation": "disable", "id": added_id }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.payload["alert"]["status"], "triggered");
+
+    // 7. delete → removed; deleting again is an explicit not-found error.
+    let out = crud
+        .execute(
+            serde_json::json!({ "operation": "delete", "id": added_id }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.payload["alert"]["id"], added_id.as_str());
+    let err = crud
+        .execute(
+            serde_json::json!({ "operation": "delete", "id": added_id }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ToolError::Execution(..)),
+        "unknown id must surface as ToolError::Execution, got {err:?}"
+    );
+
+    // 8. Input validation.
+    let err = crud
+        .execute(
+            serde_json::json!({ "operation": "add", "price": "10" }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ToolError::InvalidArguments { .. }));
+    let err = crud
+        .execute(
+            serde_json::json!({ "operation": "add", "instrument": "NSE:RELIANCE", "price": "-1" }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ToolError::InvalidArguments { .. }));
+    let err = crud
+        .execute(
+            serde_json::json!({ "operation": "delete" }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ToolError::InvalidArguments { .. }));
+    let err = list
+        .execute(
+            serde_json::json!({ "instrument": "NSE:RELIANCE", "extra": true }),
+            dummy_tool_context(),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ToolError::InvalidArguments { .. }));
+
+    // 9. The alert bundle is exactly 2 tools (list + CRUD).
+    let reader: Arc<dyn AlertReader> = Arc::new(MockAlertStore::new());
+    let writer: Arc<dyn AlertWriter> = Arc::new(MockAlertStore::new());
+    assert_eq!(create_alert_tools(reader, writer).len(), 2);
+}
+
+#[tokio::test]
 async fn test_portfolio_tools() {
     let market = Arc::new(MockMarketReader { fail_quotes: false });
     let portfolio = Arc::new(MockPortfolioReader);
@@ -621,7 +948,7 @@ async fn test_total_read_only_catalogue_count() {
 
     register_read_only_tools(&mut registry, portfolio, market, None);
     let specs = registry.specs();
-    assert_eq!(specs.len(), 14);
+    assert_eq!(specs.len(), 15);
 
     for spec in &specs {
         let tool = registry.get(&spec.name).unwrap();
@@ -683,7 +1010,12 @@ async fn test_strategy_chat_tools_execution() {
     assert!(tune_out.ok);
     assert_eq!(tune_out.payload["strategy"], "turtle_breakout");
     assert!(tune_out.payload["tuned_params"].is_object());
-    assert!(tune_out.payload["overfitting_verdict"].as_str().unwrap().contains("Overfitting Risk"));
+    assert!(
+        tune_out.payload["overfitting_verdict"]
+            .as_str()
+            .unwrap()
+            .contains("Overfitting Risk")
+    );
 
     // 3. TradeSuggestionTool
     let sugg_tool = TradeSuggestionTool::new();
@@ -705,7 +1037,10 @@ async fn test_strategy_chat_tools_execution() {
     assert!(sugg_out.ok);
     assert_eq!(sugg_out.payload["signal"]["bias"], "BUY / LONG");
     assert!(sugg_out.payload["sizing"]["quantity"].as_u64().unwrap() > 0);
-    assert!(sugg_out.payload["statutory_charges"]["total_charges"].is_number() || sugg_out.payload["statutory_charges"]["total_charges"].is_string());
+    assert!(
+        sugg_out.payload["statutory_charges"]["total_charges"].is_number()
+            || sugg_out.payload["statutory_charges"]["total_charges"].is_string()
+    );
 
     // 4. Registration in ToolRegistry
     let mut reg = ToolRegistry::new();

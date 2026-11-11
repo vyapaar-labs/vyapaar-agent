@@ -332,7 +332,7 @@ impl McpServer {
                 let cat = tool.get("category").and_then(|v| v.as_str()).unwrap_or("");
                 let matches_query = name.contains(&query_lower) || desc.contains(&query_lower);
                 // "all" means no category filter; otherwise match exact category.
-                let matches_category = category.map_or(true, |c| c == "all" || cat == c);
+                let matches_category = category.is_none_or(|c| c == "all" || cat == c);
                 matches_query && matches_category
             })
             .map(|tool| {

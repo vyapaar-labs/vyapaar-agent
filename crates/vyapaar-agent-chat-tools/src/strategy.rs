@@ -75,14 +75,25 @@ impl ChatTool for StrategyRunTool {
     }
 
     fn plan(&self, input: &Value, _ctx: &PlanContext<'_>) -> Result<ToolPlan, ToolError> {
-        let strat = input.get("strategy").and_then(|v| v.as_str()).unwrap_or("strategy");
-        let sym = input.get("symbol").and_then(|v| v.as_str()).unwrap_or("symbol");
-        Ok(ToolPlan::new(format!("Run backtest simulation for '{strat}' on {sym}")))
+        let strat = input
+            .get("strategy")
+            .and_then(|v| v.as_str())
+            .unwrap_or("strategy");
+        let sym = input
+            .get("symbol")
+            .and_then(|v| v.as_str())
+            .unwrap_or("symbol");
+        Ok(ToolPlan::new(format!(
+            "Run backtest simulation for '{strat}' on {sym}"
+        )))
     }
 
     async fn execute(&self, input: Value, _ctx: ToolContext) -> Result<ToolOutput, ToolError> {
-        let args: StrategyRunInput = serde_json::from_value(input)
-            .map_err(|e| ToolError::InvalidArguments { tool: "strategy_run".to_string(), message: format!("invalid strategy_run input: {e}") })?;
+        let args: StrategyRunInput =
+            serde_json::from_value(input).map_err(|e| ToolError::InvalidArguments {
+                tool: "strategy_run".to_string(),
+                message: format!("invalid strategy_run input: {e}"),
+            })?;
 
         let capital = args.capital.unwrap_or(Decimal::new(1000000, 0));
         let res = self
@@ -156,14 +167,25 @@ impl ChatTool for StrategyTuneTool {
     }
 
     fn plan(&self, input: &Value, _ctx: &PlanContext<'_>) -> Result<ToolPlan, ToolError> {
-        let strat = input.get("strategy").and_then(|v| v.as_str()).unwrap_or("strategy");
-        let sym = input.get("symbol").and_then(|v| v.as_str()).unwrap_or("symbol");
-        Ok(ToolPlan::new(format!("Tune parameters and audit overfitting for '{strat}' on {sym}")))
+        let strat = input
+            .get("strategy")
+            .and_then(|v| v.as_str())
+            .unwrap_or("strategy");
+        let sym = input
+            .get("symbol")
+            .and_then(|v| v.as_str())
+            .unwrap_or("symbol");
+        Ok(ToolPlan::new(format!(
+            "Tune parameters and audit overfitting for '{strat}' on {sym}"
+        )))
     }
 
     async fn execute(&self, input: Value, _ctx: ToolContext) -> Result<ToolOutput, ToolError> {
-        let args: StrategyTuneInput = serde_json::from_value(input)
-            .map_err(|e| ToolError::InvalidArguments { tool: "strategy_tune".to_string(), message: format!("invalid strategy_tune input: {e}") })?;
+        let args: StrategyTuneInput =
+            serde_json::from_value(input).map_err(|e| ToolError::InvalidArguments {
+                tool: "strategy_tune".to_string(),
+                message: format!("invalid strategy_tune input: {e}"),
+            })?;
 
         let capital = args.capital.unwrap_or(Decimal::new(1000000, 0));
         let metric = args.metric.as_deref().unwrap_or("sharpe");
@@ -239,14 +261,25 @@ impl ChatTool for TradeSuggestionTool {
     }
 
     fn plan(&self, input: &Value, _ctx: &PlanContext<'_>) -> Result<ToolPlan, ToolError> {
-        let strat = input.get("strategy").and_then(|v| v.as_str()).unwrap_or("strategy");
-        let sym = input.get("symbol").and_then(|v| v.as_str()).unwrap_or("symbol");
-        Ok(ToolPlan::new(format!("Generate optimal trade suggestion for '{strat}' on {sym}")))
+        let strat = input
+            .get("strategy")
+            .and_then(|v| v.as_str())
+            .unwrap_or("strategy");
+        let sym = input
+            .get("symbol")
+            .and_then(|v| v.as_str())
+            .unwrap_or("symbol");
+        Ok(ToolPlan::new(format!(
+            "Generate optimal trade suggestion for '{strat}' on {sym}"
+        )))
     }
 
     async fn execute(&self, input: Value, _ctx: ToolContext) -> Result<ToolOutput, ToolError> {
-        let args: TradeSuggestionInput = serde_json::from_value(input)
-            .map_err(|e| ToolError::InvalidArguments { tool: "strategy_suggest".to_string(), message: format!("invalid strategy_suggest input: {e}") })?;
+        let args: TradeSuggestionInput =
+            serde_json::from_value(input).map_err(|e| ToolError::InvalidArguments {
+                tool: "strategy_suggest".to_string(),
+                message: format!("invalid strategy_suggest input: {e}"),
+            })?;
 
         let capital = args.capital.unwrap_or(Decimal::new(1000000, 0));
         let risk_pct = args.risk_pct.unwrap_or(Decimal::new(10, 1)); // 1.0%

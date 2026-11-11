@@ -1,10 +1,10 @@
 //! Domain port and default simulation engine for algorithmic strategy execution (§4, §6).
 
-use std::collections::BTreeMap;
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::*;
 use serde_json::Value;
+use std::collections::BTreeMap;
 
 /// Domain port for executing backtests, hyperparameter tuning, and trade suggestions.
 #[async_trait]
@@ -57,7 +57,11 @@ impl StrategyRunner for DefaultStrategyRunner {
         capital: Decimal,
         params: Option<BTreeMap<String, Decimal>>,
     ) -> Result<Value, String> {
-        let base_capital = if capital > Decimal::ZERO { capital } else { Decimal::new(1000000, 0) };
+        let base_capital = if capital > Decimal::ZERO {
+            capital
+        } else {
+            Decimal::new(1000000, 0)
+        };
         let mut pnl_pct = match strategy {
             "turtle_breakout" => Decimal::new(642, 2), // +6.42%
             "sma_crossover" => Decimal::new(815, 2),   // +8.15%
@@ -98,7 +102,11 @@ impl StrategyRunner for DefaultStrategyRunner {
         capital: Decimal,
         metric: &str,
     ) -> Result<Value, String> {
-        let base_capital = if capital > Decimal::ZERO { capital } else { Decimal::new(1000000, 0) };
+        let base_capital = if capital > Decimal::ZERO {
+            capital
+        } else {
+            Decimal::new(1000000, 0)
+        };
         let mut tuned_params = BTreeMap::new();
         let mut default_params = BTreeMap::new();
 
@@ -149,8 +157,16 @@ impl StrategyRunner for DefaultStrategyRunner {
         capital: Decimal,
         risk_pct: Decimal,
     ) -> Result<Value, String> {
-        let base_capital = if capital > Decimal::ZERO { capital } else { Decimal::new(1000000, 0) };
-        let base_risk = if risk_pct > Decimal::ZERO { risk_pct } else { Decimal::new(10, 1) };
+        let base_capital = if capital > Decimal::ZERO {
+            capital
+        } else {
+            Decimal::new(1000000, 0)
+        };
+        let base_risk = if risk_pct > Decimal::ZERO {
+            risk_pct
+        } else {
+            Decimal::new(10, 1)
+        };
 
         let entry = match symbol {
             s if s.contains("NIFTY50") => Decimal::new(24150, 0),
@@ -162,7 +178,11 @@ impl StrategyRunner for DefaultStrategyRunner {
         let per_unit_risk = entry - stop_loss;
         let risk_amt = base_capital * (base_risk / Decimal::new(100, 0));
         let qty = if per_unit_risk > Decimal::ZERO {
-            (risk_amt / per_unit_risk).floor().to_u64().unwrap_or(1).max(1)
+            (risk_amt / per_unit_risk)
+                .floor()
+                .to_u64()
+                .unwrap_or(1)
+                .max(1)
         } else {
             1
         };

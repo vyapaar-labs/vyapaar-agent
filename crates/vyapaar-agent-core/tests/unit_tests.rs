@@ -68,7 +68,9 @@ fn test_closed_decision_parser_normalizes_case() {
         "qty": "20",
         "algo_id": "SEBI_01"
     }"#;
-    let dec = parser.parse_str(json_text).expect("Should parse lowercase side");
+    let dec = parser
+        .parse_str(json_text)
+        .expect("Should parse lowercase side");
     match dec {
         Decision::PlaceOrder { side, symbol, .. } => {
             assert_eq!(side, OrderSide::Buy);

@@ -11,6 +11,7 @@
 //! - **Dependency rules (R1, R2, R4)**: depends on `vyapaar-ledger` for types only; zero dependency
 //!   on `vyapaar-runtime`, `vyapaar-exec`, `vyapaar-market`, or `vyapaar-agent-trader-loop`.
 
+pub mod alert;
 pub mod calc;
 pub mod catalog;
 pub mod lift;
@@ -18,11 +19,16 @@ pub mod market;
 pub mod portfolio;
 pub mod ports;
 
+pub use alert::{
+    AlertOperation, PriceAlertInput, PriceAlertListInput, PriceAlertListTool, PriceAlertTool,
+};
 pub use calc::{
     CagrArgs, CalcOperation, MarketSegment, PositionSizingArgs, ResearchCalcInput,
     ResearchCalcTool, ReturnMetricsArgs, StatutoryCostsArgs, TradeSide,
 };
-pub use catalog::{create_read_only_tools, register_read_only_tools};
+pub use catalog::{
+    create_alert_tools, create_read_only_tools, register_alert_tools, register_read_only_tools,
+};
 pub use lift::{PureToolAdapter, lift_regime, lift_risk, lift_screener};
 pub use market::{
     MacroSeriesInput, MacroSeriesTool, MarketHistoryInput, MarketHistoryTool,
@@ -34,9 +40,10 @@ pub use portfolio::{
     PortfolioViewTool, PositionsViewInput, PositionsViewTool, TaxLotsViewInput, TaxLotsViewTool,
 };
 pub use ports::{
-    AccountSummary, DateRange, InstrumentSearchResult, MacroSeries, MarketBar, MarketHistory,
-    MarketIndicators, MarketQuote, MarketReader, OrderFilter, PortError, PortErrorKind,
-    PortfolioReader, SnapshotData, SnapshotNeeds, SnapshotSource,
+    AccountSummary, AlertReader, AlertStatus, AlertWriter, DateRange, InstrumentSearchResult,
+    MacroSeries, MarketBar, MarketHistory, MarketIndicators, MarketQuote, MarketReader,
+    OrderFilter, PortError, PortErrorKind, PortfolioReader, PriceAlert, SnapshotData,
+    SnapshotNeeds, SnapshotSource,
 };
 pub mod strategy;
 

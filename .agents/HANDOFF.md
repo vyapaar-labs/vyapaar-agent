@@ -1,43 +1,60 @@
 # HANDOFF — vyapaar-agent
 
-**Status**: All implemented plans (0001–0005) complete and merged to `main`. New documentation batch added: `docs/gaps/` (7 open gaps), `docs/plans/` (plans 0002 & 0003 active), `docs/design/` (migration map + guardrails + 9 code reference docs), `docs/roadmap/` (updated + migration verification). Batch done.
-- `docs/migration-guide.md` decimated: sub-crate mapping table moved to `docs/design/code-migration-map.md`; guardrails & invariants moved to `docs/design/code-guardrails.md`; verification commands moved to `docs/roadmap/migration-verification.md`; original `migration-guide.md` removed.
-**Date**: 2026-11-09 · Repo: `vyapaar-agent` · Branch: `main`
+**Date**: 2026-11-11 · Repo: `vyapaar-agent` · Branch: `main`
 
-## Phase / Slice Status (COMPLETE — merged)
+## Phase / Slice Status
 
-- **Plan 0001** (MCP gateway discovery, universal result protocol, 15 quantitative engines): implemented — `VyapaarResultEnvelope`, `DataReferenceStore`, MCP gateway discovery, 10 tests.
-- **Plan 0002** (job scheduler, memory engine, strategy verification, session checkpoints): commits `d27da44` + `ec54849` + `58255fb`. Merged in `5ac0919`.
-- **Plan 0004 Phase 4** (local SLM determinism hardening, plan 0005 §4): commit `b703a59`. Merged in `5ac0919`.
-- **Plan 0005** (reference material): finalized in `c5557fa`. Merged in `5ac0919`.
-- **Plan 0004** (Free-Tier Multi-Provider LLM Backend): fully implemented through Phase 3. Phase 4 (local SLM) deferred by design. Commit `e6b9b76`.
-
-## Active Plans (new — tracking open gaps)
-
-- **Plan 0002** `docs/plans/0002-tdd-cleanup-and-chat-tools.md`: TDD cleanup (gap 0001 — inline `#[cfg(test)]` in `ref_store.rs`) + `vyapaar-agent-chat-tools` crate (gap 0002). Target: `vyapaar-agent-core`, `vyapaar-agent-chat-tools`.
-- **Plan 0003** `docs/plans/0003-persistent-memory-and-mcp-client.md`: persistent `UserMemory` (gap 0003), MCP stdio client bridge (gap 0004), `ResearchNote` (gap 0005), monitor scheduler bridge (gap 0006), prompt cache-hit regression tests (gap 0007). Target: `vyapaar-agent-core`, `vyapaar-agent-prompt`, `vyapaar-agent-mcp`, `vyapaar-agent-report`, `vyapaar-agent-research`.
+- **Plan 0006 Phase 2 — `PriceAlertTool` CRUD (implemented, all gates green)**: new
+  `AlertReader`/`AlertWriter` port (`src/ports/alert.rs`: `PriceAlert` DTO mirroring ui-web's
+  `AlertMeta`, `AlertStatus` active/triggered/paused); tools in `src/alert.rs` —
+  `price_alert_list` (ReadOnly) + `price_alert` (LocalWrite; ops add/delete/enable/disable);
+  registered via new `create_alert_tools`/`register_alert_tools` catalog functions, so the
+  read-only catalogue count stays pinned at 15. Tests: `MockAlertStore` +
+  `test_alert_tools` (CRUD, filters, triggered no-op, validation, risk tiers, bundle count = 2)
+  in `tests/unit_tests.rs` (12 total). Runtime side (in `vyapaar-runtime`):
+  `chat_alerts.rs::ProfileAlertStore` over the existing `Profile.alerts` document — see that
+  repo's HANDOFF for the storage decision.
+- **Plan 0006 Phase 1 — `BlockDealsTool` (implemented 2026-11-11, all gates green)**: one line,
+  see `docs/plans/README.md`-style record below and Phase 1 of plan 0006.
+- **Plans 0001–0005**: complete and merged — see `docs/plans/README.md` Implemented table
+  (0004's Phase 4 local-SLM deferral and plan 0005 QLoRA/BLAS notes live there, not here).
 
 ## Immediate Next Step
 
-Execute plan 0002: (1) move inline tests out of `vyapaar-agent-core/src/ref_store.rs` into `crates/vyapaar-agent-core/tests/ref_store_tests.rs`; (2) create `vyapaar-agent-chat-tools` crate with `PureToolAdapter` + reader ports, respecting dependency rules R1–R3.
+Plan 0006 Phase 3 — `NewsSearchTool`/`FilingsSearchTool`: first verify against
+`vyapaar-data/docs/gaps/README.md` + `vyapaar_data/service/filings_reader.py` (closed gap 0003)
+whether filings ingestion already exists — if so it's pure tool-layer wiring like Phase 1;
+otherwise file the missing-reader gap in `vyapaar-data` first. Phase 4 stays blocked until its
+two upstream gaps are filed (`vyapaar-market` options-chain, corporate actions).
 
-## Decisions & Discoveries (final)
+## Decisions & Discoveries
 
-- Tier-1 local-SLM provider role filled by existing `CandleGgufProvider` (pure-Rust Candle CPU) rather than new `LlamaCppProvider`/`VllmProvider` impls.
-- Two parallel `LlmAuditRecord` types exist; replay crate's record is the canonical hash-chained audited record (fingerprinted).
-- Models downloaded at `/home/pmallapp/Devel/Finance/vyapaar-labs/models/`: `Llama-3.2-3B-Instruct-Q4_K_M.gguf`, `zenfinance-3b-Instruct.Q4_K_M.gguf`, `SmolLM2-360M-Instruct.Q4_K_M.gguf`.
-- Rule violation found: `vyapaar-agent-core/src/ref_store.rs` contains inline `#[cfg(test)]` block (gap 0001) — must be moved to `tests/` per TDD rule.
-- `vyapaar-agent-chat-tools` (15th crate) does not yet exist (gap 0002).
-
-## Remaining (explicit deferral per plan 0004 design)
-
-- QLoRA fine-tuning on Phase-3 fixtures — needs GPU + training pipeline; deferred, not stubbed.
-- BLAS/OMP thread pinning for full CPU determinism — deployment ops; thread count now auditable via fingerprint.
+- Chat catalogue: **15 read-only tools** (`test_total_read_only_catalogue_count` pins the count)
+  **plus** the 2-tool alert bundle (`create_alert_tools`: 1 ReadOnly list + 1 LocalWrite CRUD —
+  LocalWrite deliberately outside the all-ReadOnly bundle so its invariant and count pin are
+  untouched). Plan 0006 §2's flat-registry decision stands (revisit at ~40 tools).
+- Alert storage is the user's `Profile.alerts` document in `vyapaar-runtime` (second writer
+  beside `vyapaar-ui-web`'s alerts-store): DTO is camelCase `AlertMeta`-shaped with decimal-string
+  `price`, so both writers round-trip the same array. Port contract: caller mints ids
+  (`al_<unix_ms>_<counter>`), duplicates rejected; `Triggered` alerts are never flipped by
+  enable/disable (ui-web toggle parity); unknown id → `Ok(None)` from the port, surfaced by the
+  tool as a not-found `ToolError::Execution`.
+- `ToolRisk::LocalWrite` on the chat agent triggers the existing Interactive permission prompt
+  per mutating call (`ToolTraits::new` also forces serial execution for non-ReadOnly) — no
+  engine change was needed.
+- `MarketReader::block_deals` returns `PortError::unavailable` from `FeedMarketReader` until
+  `vyapaar-data` gap 0005 closes — never an empty success (chat agent honestly reports the gap).
+- `MarketReader` has exactly two implementors: `FeedMarketReader` (runtime-api-rest) and
+  `RuntimeMarketReader` (runtime-api, seedable test adapter). Any new MarketReader method must
+  touch both (not needed for the alert port: it has the one profile-backed implementor).
+- Toolchain's clippy (rust-1.97) flags `map_or(true, ..)` as `unnecessary_map_or`; use
+  `is_none_or` in new code.
 
 ## Operating Invariants
 
-- Canonical profile `prod`: `cargo build/check/test --profile prod`.
-- Tests in `tests/` parallel to `src/`; no in-file `#[test]` (gap 0001 is an active violation to fix).
-- Zero floats in financial paths; `rust_decimal::Decimal` for temperature.
-- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --profile prod` green on touched crates; workspace `cargo check --profile prod` green.
-- Gap/plan numbering is per-repo, sequential, never reused (`.agents/rules/gap-tracking.md`).
+- Canonical profile `prod`: `cargo build/check/test --profile prod`; `make prod` end-of-turn (§11).
+- Tests in `tests/` parallel to `src/`; no in-file `#[test]`.
+- Zero floats in financial paths; `rust_decimal::Decimal`.
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets --profile prod -- -D warnings`,
+  `cargo test --workspace --profile prod` all green (verified 2026-11-11).
+- Gap/plan numbering per-repo, sequential, never reused (`.agents/rules/gap-tracking.md`).

@@ -89,6 +89,27 @@ pub struct MacroSeries {
     pub points: Vec<(DateTime<Utc>, Decimal)>,
 }
 
+/// A single disclosed block or bulk deal (exchange disclosure feed).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BlockDeal {
+    /// Instrument identifier.
+    pub instrument: InstrumentId,
+    /// Exchange that disclosed the deal (e.g. "NSE", "BSE").
+    pub exchange: String,
+    /// Disclosed client / trading-member name.
+    pub client_name: String,
+    /// Deal side: "buy" or "sell".
+    pub side: String,
+    /// Deal category: "block" or "bulk".
+    pub category: String,
+    /// Traded quantity.
+    pub quantity: Quantity,
+    /// Traded price.
+    pub price: Price,
+    /// Disclosure / trade date.
+    pub trade_date: DateTime<Utc>,
+}
+
 /// Read-only market data port (§6.4).
 ///
 /// Implemented by runtime application layer over market feeds and history stores.
@@ -120,6 +141,13 @@ pub trait MarketReader: Send + Sync + 'static {
 
     /// Fetch macro-economic series data (e.g. CPI, IIP, RBI repo rate).
     async fn macro_series(&self, series: &str) -> Result<MacroSeries, PortError>;
+
+    /// Fetch disclosed block/bulk deals for a date (defaults to latest trading day) or instrument.
+    async fn block_deals(
+        &self,
+        instrument: Option<&InstrumentId>,
+        date: Option<DateTime<Utc>>,
+    ) -> Result<Vec<BlockDeal>, PortError>;
 
     /// Fetch pre-trade price bands for an instrument.
     async fn price_band(&self, instrument: &InstrumentId) -> Result<PriceBand, PortError>;

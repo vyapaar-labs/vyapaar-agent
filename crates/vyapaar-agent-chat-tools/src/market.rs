@@ -479,3 +479,102 @@ impl ChatTool for MacroSeriesTool {
         ))
     }
 }
+
+// ——————————————————————————————————————————————————————————————————————————
+// 6. block_deals
+// ——————————————————————————————————————————————————————————————————————————
+
+/// Input arguments for `block_deals`.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BlockDealsInput {
+    /// Instrument symbol filter (e.g. "NSE:RELIANCE", "TCS"). Omit for all instruments.
+    pub instrument: Option<String>,
+    /// Trade date filter (RFC3339, e.g. "2026-11-10T00:00:00Z"). Omit for the latest trading day.
+    pub date: Option<String>,
+}
+
+/// Chat tool fetching disclosed block and bulk deals (§6.5).
+pub struct BlockDealsTool {
+    reader: Arc<dyn MarketReader>,
+    spec: ToolSpec,
+}
+
+impl BlockDealsTool {
+    /// Create new block deals tool.
+    pub fn new(reader: Arc<dyn MarketReader>) -> Self {
+        let schema = schemars::schema_for!(BlockDealsInput);
+        let spec = ToolSpec::new(
+            "block_deals",
+            "Fetch disclosed block and bulk deals for an instrument or trading day.",
+            serde_json::to_value(schema).unwrap_or_default(),
+        );
+        Self { reader, spec }
+    }
+}
+
+#[async_trait]
+impl ChatTool for BlockDealsTool {
+    fn spec(&self) -> &ToolSpec {
+        &self.spec
+    }
+
+    fn traits(&self) -> ToolTraits {
+        ToolTraits::new(ToolRisk::ReadOnly)
+    }
+
+    fn plan(&self, input: &Value, _ctx: &PlanContext<'_>) -> Result<ToolPlan, ToolError> {
+        let target = input
+            .get("instrument")
+            .and_then(Value::as_str)
+            .unwrap_or("all instruments");
+        Ok(ToolPlan::new(format!(
+            "Fetch disclosed block/bulk deals for `{target}`"
+        )))
+    }
+
+    async fn execute(&self, input: Value, _ctx: ToolContext) -> Result<ToolOutput, ToolError> {
+        let args: BlockDealsInput =
+            serde_json::from_value(input).map_err(|e| ToolError::InvalidArguments {
+                tool: "block_deals".to_string(),
+                message: format!("schema validation failure: {e}"),
+            })?;
+
+        let inst = args
+            .instrument
+            .as_deref()
+            .map(parse_instrument)
+            .transpose()?;
+        let date = args.date.as_deref().and_then(parse_timestamp);
+
+        let deals = self
+            .reader
+            .block_deals(inst.as_ref(), date)
+            .await
+            .map_err(|e| e.into_tool_error("block_deals"))?;
+
+        let deals_json: Vec<Value> = deals
+            .into_iter()
+            .map(|d| {
+                serde_json::json!({
+                    "instrument": d.instrument.to_string(),
+                    "exchange": d.exchange,
+                    "client_name": d.client_name,
+                    "side": d.side,
+                    "category": d.category,
+                    "quantity": d.quantity.0,
+                    "price": d.price.0,
+                    "trade_date": d.trade_date,
+                })
+            })
+            .collect();
+
+        Ok(ToolOutput::ok(
+            "block_deals",
+            serde_json::json!({
+                "deals": deals_json,
+                "count": deals_json.len(),
+            }),
+        ))
+    }
+}
