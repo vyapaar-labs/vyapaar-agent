@@ -15,6 +15,9 @@ pub struct MonteCarloConfig {
     pub num_simulations: usize,
     /// Block length in bars. If 0, defaults to $\max(2, \lfloor T^{1/3} \rfloor)$.
     pub block_size: usize,
+    /// Simulation horizon in bars. If 0, defaults to the length of the input series.
+    #[serde(default)]
+    pub horizon: usize,
     /// Deterministic seed for reproducible simulation.
     pub seed: u64,
     /// Maximum acceptable 95% drawdown threshold (default: 0.25 = 25%).
@@ -28,6 +31,7 @@ impl Default for MonteCarloConfig {
         Self {
             num_simulations: 500,
             block_size: 0,
+            horizon: 0,
             seed: 42,
             max_acceptable_drawdown_95: 0.30,
             ruin_drawdown_threshold: 0.50,
@@ -79,6 +83,11 @@ pub fn run_block_bootstrap(returns: &[f64], config: MonteCarloConfig) -> MonteCa
     }
     .max(2);
 
+    let path_len = if config.horizon > 0 {
+        config.horizon
+    } else {
+        t
+    };
     let num_sims = config.num_simulations.max(10);
     let mut rng = SplitMix64::new(config.seed);
 
@@ -87,16 +96,16 @@ pub fn run_block_bootstrap(returns: &[f64], config: MonteCarloConfig) -> MonteCa
     let mut ruin_count = 0;
 
     for _ in 0..num_sims {
-        // Construct a synthetic path of length t by drawing contiguous blocks
+        // Construct a synthetic path of length path_len by drawing contiguous blocks
         let mut equity = 1.0;
         let mut peak = 1.0;
         let mut max_dd = 0.0;
         let mut bars_generated = 0;
 
-        while bars_generated < t {
+        while bars_generated < path_len {
             // Pick a random block start index
             let start = rng.next_usize(t);
-            let take = b.min(t - bars_generated);
+            let take = b.min(path_len - bars_generated);
 
             for j in 0..take {
                 let idx = (start + j) % t;
@@ -147,4 +156,14 @@ pub fn run_block_bootstrap(returns: &[f64], config: MonteCarloConfig) -> MonteCa
         prob_ruin,
         passed,
     }
+}
+
+/// Convenience helper to run moving-block bootstrap with specified simulation count and horizon.
+pub fn simulate_bootstrap(returns: &[f64], num_sims: usize, horizon: usize) -> MonteCarloResult {
+    let mut config = MonteCarloConfig::default();
+    if num_sims > 0 {
+        config.num_simulations = num_sims;
+    }
+    config.horizon = horizon;
+    run_block_bootstrap(returns, config)
 }

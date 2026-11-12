@@ -88,3 +88,22 @@ pub fn compute_walk_forward(returns: &[f64], config: WalkForwardConfig) -> WalkF
         passed,
     }
 }
+
+/// Evaluates Walk-Forward Efficiency using explicit train and test window sizes.
+pub fn evaluate_walk_forward(
+    returns: &[f64],
+    train_size: usize,
+    test_size: usize,
+) -> WalkForwardResult {
+    let in_sample_fraction = if train_size + test_size > 0 {
+        (train_size as f64 / (train_size + test_size) as f64).clamp(0.2, 0.8)
+    } else {
+        0.60
+    };
+
+    let config = WalkForwardConfig {
+        in_sample_fraction,
+        ..Default::default()
+    };
+    compute_walk_forward(returns, config)
+}

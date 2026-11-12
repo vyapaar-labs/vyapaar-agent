@@ -8,7 +8,14 @@
 //! - `optimize_strategy`: Triggers genetic or Bayesian parameter sweep in honba-ya.
 //! - `explain_decision`: Returns exact prompt, market context, and risk check for a historical trade decision.
 
+use std::collections::HashMap;
 use std::time::Duration;
+
+use vyapaar_agent_analytics::{
+    FactorReturnPanel, PortfolioHolding, compute_factor_attribution, evaluate_walk_forward,
+    factor_attribution_blocks, fit_cross_sectional_factor_model, simulate_bootstrap,
+    test_engle_granger,
+};
 
 use rust_decimal::Decimal;
 use serde_json::json;
@@ -268,6 +275,109 @@ pub fn list_tool_definitions() -> Vec<serde_json::Value> {
                     "learning_rate": { "type": "number", "description": "Shrinkage (gradient_boost)" }
                 },
                 "required": ["series"]
+            }
+        }),
+        json!({
+            "name": "vyapaar_monte_carlo",
+            "category": "analytics",
+            "description": "Simulates equity paths using stationary moving-block bootstrap to estimate drawdowns, ruin probabilities, and stability",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "returns": {
+                        "type": "array",
+                        "items": { "type": "number" },
+                        "description": "Historical return series in chronological order"
+                    },
+                    "num_sims": {
+                        "type": "integer",
+                        "minimum": 10,
+                        "default": 500,
+                        "description": "Number of simulated equity paths to generate"
+                    },
+                    "horizon": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Simulation horizon in bars (defaults to length of input series)"
+                    }
+                },
+                "required": ["returns"]
+            }
+        }),
+        json!({
+            "name": "vyapaar_cointegration",
+            "category": "analytics",
+            "description": "Performs Engle-Granger two-step cointegration test and computes pairs trading hedge ratio, ADF statistic, and spread z-score",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "series_x": {
+                        "type": "array",
+                        "items": { "type": "number" },
+                        "description": "Independent price/return series X"
+                    },
+                    "series_y": {
+                        "type": "array",
+                        "items": { "type": "number" },
+                        "description": "Dependent price/return series Y"
+                    }
+                },
+                "required": ["series_x", "series_y"]
+            }
+        }),
+        json!({
+            "name": "vyapaar_walk_forward",
+            "category": "analytics",
+            "description": "Evaluates Walk-Forward Efficiency (WFE) by splitting return series into in-sample and out-of-sample periods to detect overfitting",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "returns": {
+                        "type": "array",
+                        "items": { "type": "number" },
+                        "description": "Return series in chronological order"
+                    },
+                    "train_size": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Number of bars in training/in-sample window"
+                    },
+                    "test_size": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Number of bars in testing/out-of-sample window"
+                    }
+                },
+                "required": ["returns"]
+            }
+        }),
+        json!({
+            "name": "vyapaar_factor_attribution",
+            "category": "analytics",
+            "description": "Decomposes portfolio/asset returns and risk into systematic factor exposures and idiosyncratic residual risk",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "asset_returns": {
+                        "type": "array",
+                        "items": { "type": "number" },
+                        "description": "Observed asset or portfolio return series"
+                    },
+                    "factor_returns": {
+                        "type": "object",
+                        "description": "Map of factor name to factor return series, or factor return panel"
+                    },
+                    "holdings": {
+                        "type": "array",
+                        "description": "Optional portfolio holdings with style/sector exposures for cross-sectional factor model"
+                    },
+                    "annualization_factor": {
+                        "type": "number",
+                        "default": 252.0,
+                        "description": "Annualization factor (e.g. 252 for daily trading sessions)"
+                    }
+                },
+                "required": ["factor_returns"]
             }
         }),
         // --- Two-Tier Gateway Discovery Protocol ---
@@ -976,6 +1086,283 @@ fn parse_forecast_model(args: &serde_json::Value) -> Result<ForecastModel, McpEr
         other => Err(McpError::InvalidArguments(format!(
             "unknown forecast model: {other}"
         ))),
+    }
+}
+
+/// Quantitative analytics engines service (Plan 0007 Track 1 Phase 1).
+pub struct AnalyticsToolService;
+
+impl Default for AnalyticsToolService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AnalyticsToolService {
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Block-bootstrap Monte Carlo simulation for drawdown and ruin estimation.
+    pub fn monte_carlo(&self, args: &serde_json::Value) -> Result<serde_json::Value, McpError> {
+        let returns_val = args
+            .get("returns")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| McpError::InvalidArguments("missing returns array".to_string()))?;
+        let returns: Vec<f64> = returns_val.iter().filter_map(|v| v.as_f64()).collect();
+        let num_sims = args.get("num_sims").and_then(|v| v.as_u64()).unwrap_or(500) as usize;
+        let horizon = args.get("horizon").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+
+        let result = simulate_bootstrap(&returns, num_sims, horizon);
+
+        let summary = format!(
+            "Monte Carlo bootstrap of {} paths (median DD: {:.2}%, 95% VaR DD: {:.2}%, prob_loss: {:.2}%, passed: {})",
+            result.simulations_run,
+            result.median_max_drawdown * 100.0,
+            result.drawdown_95 * 100.0,
+            result.prob_loss * 100.0,
+            result.passed
+        );
+
+        let envelope =
+            VyapaarResultEnvelope::ok(summary, result).with_block(DisplayBlock::MetricGrid {
+                items: vec![
+                    MetricItem {
+                        label: "simulations_run".to_string(),
+                        value: result.simulations_run.to_string(),
+                    },
+                    MetricItem {
+                        label: "median_max_drawdown".to_string(),
+                        value: format!("{:.2}%", result.median_max_drawdown * 100.0),
+                    },
+                    MetricItem {
+                        label: "drawdown_95".to_string(),
+                        value: format!("{:.2}%", result.drawdown_95 * 100.0),
+                    },
+                    MetricItem {
+                        label: "drawdown_99".to_string(),
+                        value: format!("{:.2}%", result.drawdown_99 * 100.0),
+                    },
+                    MetricItem {
+                        label: "prob_loss".to_string(),
+                        value: format!("{:.2}%", result.prob_loss * 100.0),
+                    },
+                    MetricItem {
+                        label: "prob_ruin".to_string(),
+                        value: format!("{:.2}%", result.prob_ruin * 100.0),
+                    },
+                    MetricItem {
+                        label: "passed".to_string(),
+                        value: result.passed.to_string(),
+                    },
+                ],
+            });
+
+        serde_json::to_value(envelope).map_err(McpError::Json)
+    }
+
+    /// Engle-Granger two-step cointegration test and spread analysis.
+    pub fn cointegration(&self, args: &serde_json::Value) -> Result<serde_json::Value, McpError> {
+        let sx_val = args
+            .get("series_x")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| McpError::InvalidArguments("missing series_x array".to_string()))?;
+        let sy_val = args
+            .get("series_y")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| McpError::InvalidArguments("missing series_y array".to_string()))?;
+
+        let series_x: Vec<f64> = sx_val.iter().filter_map(|v| v.as_f64()).collect();
+        let series_y: Vec<f64> = sy_val.iter().filter_map(|v| v.as_f64()).collect();
+
+        let result = test_engle_granger(&series_x, &series_y)
+            .map_err(|e| McpError::Internal(format!("cointegration test failed: {e}")))?;
+
+        let summary = format!(
+            "Engle-Granger cointegration test: is_cointegrated={}, beta={:.4}, ADF stat={:.3} (p={:.4})",
+            result.is_cointegrated, result.hedge_ratio, result.adf_stat, result.p_value
+        );
+
+        let half_life_str = result
+            .half_life
+            .map(|h| format!("{:.2} bars", h))
+            .unwrap_or_else(|| "N/A".to_string());
+
+        let envelope =
+            VyapaarResultEnvelope::ok(summary, result).with_block(DisplayBlock::MetricGrid {
+                items: vec![
+                    MetricItem {
+                        label: "is_cointegrated".to_string(),
+                        value: result.is_cointegrated.to_string(),
+                    },
+                    MetricItem {
+                        label: "hedge_ratio".to_string(),
+                        value: format!("{:.4}", result.hedge_ratio),
+                    },
+                    MetricItem {
+                        label: "intercept".to_string(),
+                        value: format!("{:.4}", result.intercept),
+                    },
+                    MetricItem {
+                        label: "adf_stat".to_string(),
+                        value: format!("{:.4}", result.adf_stat),
+                    },
+                    MetricItem {
+                        label: "p_value".to_string(),
+                        value: format!("{:.4}", result.p_value),
+                    },
+                    MetricItem {
+                        label: "crit_5pct".to_string(),
+                        value: format!("{:.4}", result.crit_value_5pct),
+                    },
+                    MetricItem {
+                        label: "half_life".to_string(),
+                        value: half_life_str,
+                    },
+                    MetricItem {
+                        label: "current_z_score".to_string(),
+                        value: format!("{:.3}", result.current_z_score),
+                    },
+                ],
+            });
+
+        serde_json::to_value(envelope).map_err(McpError::Json)
+    }
+
+    /// Walk-Forward Efficiency (WFE) evaluation.
+    pub fn walk_forward(&self, args: &serde_json::Value) -> Result<serde_json::Value, McpError> {
+        let returns_val = args
+            .get("returns")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| McpError::InvalidArguments("missing returns array".to_string()))?;
+        let returns: Vec<f64> = returns_val.iter().filter_map(|v| v.as_f64()).collect();
+
+        let train_size = args.get("train_size").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let test_size = args.get("test_size").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+
+        let result = evaluate_walk_forward(&returns, train_size, test_size);
+
+        let summary = format!(
+            "Walk-Forward Efficiency: WFE={:.2}%, IS Return={:.2}%, OOS Return={:.2}%, passed={}",
+            result.wfe * 100.0,
+            result.is_annual_return * 100.0,
+            result.oos_annual_return * 100.0,
+            result.passed
+        );
+
+        let envelope =
+            VyapaarResultEnvelope::ok(summary, result).with_block(DisplayBlock::MetricGrid {
+                items: vec![
+                    MetricItem {
+                        label: "wfe".to_string(),
+                        value: format!("{:.2}%", result.wfe * 100.0),
+                    },
+                    MetricItem {
+                        label: "is_annual_return".to_string(),
+                        value: format!("{:.2}%", result.is_annual_return * 100.0),
+                    },
+                    MetricItem {
+                        label: "oos_annual_return".to_string(),
+                        value: format!("{:.2}%", result.oos_annual_return * 100.0),
+                    },
+                    MetricItem {
+                        label: "is_sharpe".to_string(),
+                        value: format!("{:.2}", result.is_sharpe),
+                    },
+                    MetricItem {
+                        label: "oos_sharpe".to_string(),
+                        value: format!("{:.2}", result.oos_sharpe),
+                    },
+                    MetricItem {
+                        label: "passed".to_string(),
+                        value: result.passed.to_string(),
+                    },
+                ],
+            });
+
+        serde_json::to_value(envelope).map_err(McpError::Json)
+    }
+
+    /// Factor attribution of returns and risk across systematic factors.
+    pub fn factor_attribution(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, McpError> {
+        let annualization = args
+            .get("annualization_factor")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(252.0);
+
+        let attribution = if let Some(holdings_val) =
+            args.get("holdings").and_then(|v| v.as_array())
+        {
+            let holdings: Vec<PortfolioHolding> =
+                serde_json::from_value(serde_json::Value::Array(holdings_val.clone()))
+                    .map_err(|e| McpError::InvalidArguments(format!("invalid holdings: {e}")))?;
+            let factor_panel: FactorReturnPanel =
+                serde_json::from_value(args.get("factor_returns").cloned().ok_or_else(|| {
+                    McpError::InvalidArguments("missing factor_returns".to_string())
+                })?)
+                .map_err(|e| {
+                    McpError::InvalidArguments(format!("invalid factor_returns panel: {e}"))
+                })?;
+
+            fit_cross_sectional_factor_model(&holdings, &factor_panel, annualization)
+                .map_err(|e| McpError::Internal(format!("factor attribution failed: {e}")))?
+        } else {
+            let asset_returns_val = args
+                .get("asset_returns")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| {
+                    McpError::InvalidArguments("missing asset_returns or holdings".to_string())
+                })?;
+            let asset_returns: Vec<f64> = asset_returns_val
+                .iter()
+                .filter_map(|v| v.as_f64())
+                .collect();
+
+            let factor_returns_val = args
+                .get("factor_returns")
+                .and_then(|v| v.as_object())
+                .ok_or_else(|| {
+                    McpError::InvalidArguments("missing factor_returns object".to_string())
+                })?;
+
+            let mut factor_returns = HashMap::new();
+            for (k, v) in factor_returns_val {
+                let series: Vec<f64> = v
+                    .as_array()
+                    .ok_or_else(|| {
+                        McpError::InvalidArguments(format!(
+                            "factor '{k}' must be an array of numbers"
+                        ))
+                    })?
+                    .iter()
+                    .filter_map(|n| n.as_f64())
+                    .collect();
+                factor_returns.insert(k.clone(), series);
+            }
+
+            compute_factor_attribution(&asset_returns, &factor_returns, annualization)
+                .map_err(|e| McpError::Internal(format!("factor attribution failed: {e}")))?
+        };
+
+        let summary = format!(
+            "Factor attribution: total_return={:.2}%, factor_return={:.2}%, total_risk={:.2}%, specific_risk={:.2}% across {} factors",
+            attribution.total_return * 100.0,
+            attribution.factor_return * 100.0,
+            attribution.total_risk * 100.0,
+            attribution.specific_risk * 100.0,
+            attribution.n_factors
+        );
+
+        let blocks = factor_attribution_blocks(&attribution);
+        let mut envelope = VyapaarResultEnvelope::ok(summary, attribution);
+        for block in blocks {
+            envelope = envelope.with_block(block);
+        }
+
+        serde_json::to_value(envelope).map_err(McpError::Json)
     }
 }
 

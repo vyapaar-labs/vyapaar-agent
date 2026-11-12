@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 use vyapaar_agent_core::{DisplayBlock, MetricItem};
 
 use crate::error::{AnalyticsError, Result};
+use crate::math::{mean, variance};
 
 /// A style-factor exposure for one asset.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -107,7 +108,7 @@ pub struct FactorAttribution {
 ///   exactly 1; they are normalized).
 /// - `factor_returns`: a panel of per-period factor returns. Every factor that
 ///   appears in `holdings` must appear in every period's row; extra factors
-///   are allowed and simply contribute zero exposure.
+///   are allowed and simply contribute zero exposure.\
 /// - `annualization_factor`: periods per year used to annualize risk
 ///   (e.g. 252 for daily returns).
 pub fn fit_cross_sectional_factor_model(
@@ -278,6 +279,198 @@ pub fn fit_cross_sectional_factor_model(
         factors: factors_contrib,
         n_periods,
         n_assets,
+        n_factors,
+    })
+}
+
+#[allow(clippy::needless_range_loop)]
+fn solve_linear_system(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Option<Vec<f64>> {
+    let n = b.len();
+    for i in 0..n {
+        let mut max_row = i;
+        let mut max_val = a[i][i].abs();
+        for k in (i + 1)..n {
+            if a[k][i].abs() > max_val {
+                max_val = a[k][i].abs();
+                max_row = k;
+            }
+        }
+        if max_val < 1e-12 {
+            return None;
+        }
+        a.swap(i, max_row);
+        b.swap(i, max_row);
+
+        let pivot = a[i][i];
+        for j in i..n {
+            a[i][j] /= pivot;
+        }
+        b[i] /= pivot;
+
+        for k in 0..n {
+            if k != i {
+                let factor = a[k][i];
+                for j in i..n {
+                    a[k][j] -= factor * a[i][j];
+                }
+                b[k] -= factor * b[i];
+            }
+        }
+    }
+    Some(b)
+}
+
+/// Time-series multi-factor regression attribution.
+///
+/// Regresses asset returns $R_t$ against factor returns $F_{k,t}$:
+/// $R_t = \alpha + \sum_{k=1}^K \beta_k F_{k,t} + \epsilon_t$
+///
+/// Decomposes total return and risk into factor exposures ($\beta_k$) and idiosyncratic residual risk.
+#[allow(clippy::needless_range_loop)]
+pub fn compute_factor_attribution(
+    asset_returns: &[f64],
+    factor_returns: &HashMap<String, Vec<f64>>,
+    annualization_factor: f64,
+) -> Result<FactorAttribution> {
+    if asset_returns.is_empty() {
+        return Err(AnalyticsError::EmptyInput);
+    }
+    if factor_returns.is_empty() {
+        return Err(AnalyticsError::InsufficientData { needed: 1, got: 0 });
+    }
+    let n_periods = asset_returns.len();
+    if n_periods < 3 {
+        return Err(AnalyticsError::InsufficientData {
+            needed: 3,
+            got: n_periods,
+        });
+    }
+
+    let ann_factor = if annualization_factor > 0.0 && annualization_factor.is_finite() {
+        annualization_factor
+    } else {
+        252.0
+    };
+
+    let mut factor_names: Vec<String> = factor_returns.keys().cloned().collect();
+    factor_names.sort();
+    let n_factors = factor_names.len();
+
+    for name in &factor_names {
+        let f_series = &factor_returns[name];
+        if f_series.len() != n_periods {
+            return Err(AnalyticsError::TradeMismatch(format!(
+                "factor '{name}' length mismatch: {} != {}",
+                f_series.len(),
+                n_periods
+            )));
+        }
+    }
+
+    // Set up linear system: p = n_factors + 1 (1 intercept + K factor slopes)
+    let p = n_factors + 1;
+    let mut ata = vec![vec![0.0; p]; p];
+    let mut aty = vec![0.0; p];
+
+    for t in 0..n_periods {
+        let mut x = vec![1.0; p];
+        for k in 0..n_factors {
+            x[k + 1] = factor_returns[&factor_names[k]][t];
+        }
+        let y = asset_returns[t];
+
+        for i in 0..p {
+            for j in 0..p {
+                ata[i][j] += x[i] * x[j];
+            }
+            aty[i] += x[i] * y;
+        }
+    }
+
+    let beta = solve_linear_system(ata, aty).ok_or(AnalyticsError::ZeroVariance)?;
+    let alpha = beta[0];
+    let loadings = &beta[1..];
+
+    // Compute factor covariance matrix and means
+    let mut mean_factor_returns = vec![0.0; n_factors];
+    for k in 0..n_factors {
+        mean_factor_returns[k] = mean(&factor_returns[&factor_names[k]]);
+    }
+
+    let mut cov = vec![vec![0.0; n_factors]; n_factors];
+    for i in 0..n_factors {
+        let fi = &factor_returns[&factor_names[i]];
+        for j in 0..n_factors {
+            let fj = &factor_returns[&factor_names[j]];
+            let mut sum = 0.0;
+            for t in 0..n_periods {
+                sum += (fi[t] - mean_factor_returns[i]) * (fj[t] - mean_factor_returns[j]);
+            }
+            cov[i][j] = sum / (n_periods - 1) as f64;
+        }
+    }
+
+    // Predicted returns and residuals
+    let mut residuals = Vec::with_capacity(n_periods);
+    for t in 0..n_periods {
+        let mut pred = alpha;
+        for k in 0..n_factors {
+            pred += loadings[k] * factor_returns[&factor_names[k]][t];
+        }
+        residuals.push(asset_returns[t] - pred);
+    }
+
+    let mut factor_variance = 0.0;
+    for i in 0..n_factors {
+        let mut row_sum = 0.0;
+        for j in 0..n_factors {
+            row_sum += loadings[j] * cov[i][j];
+        }
+        factor_variance += loadings[i] * row_sum;
+    }
+    factor_variance = factor_variance.max(0.0) * ann_factor;
+    let factor_risk = factor_variance.sqrt();
+
+    let specific_variance = variance(&residuals) * ann_factor;
+    let specific_risk = specific_variance.sqrt();
+    let total_risk = (factor_variance + specific_variance).sqrt();
+
+    let mut factors_contrib = Vec::with_capacity(n_factors);
+    for k in 0..n_factors {
+        let mut factor_var_share = 0.0;
+        for j in 0..n_factors {
+            factor_var_share += loadings[j] * cov[k][j];
+        }
+        factor_var_share *= loadings[k];
+        let contribution_pct = if factor_variance > 0.0 {
+            factor_var_share * ann_factor / factor_variance * 100.0
+        } else {
+            0.0
+        };
+
+        factors_contrib.push(FactorContribution {
+            factor: factor_names[k].clone(),
+            exposure: loadings[k],
+            avg_factor_return: mean_factor_returns[k],
+            return_contribution: loadings[k] * mean_factor_returns[k],
+            risk_contribution_pct: contribution_pct,
+        });
+    }
+
+    let factor_return: f64 = factors_contrib.iter().map(|f| f.return_contribution).sum();
+    let total_return = mean(asset_returns);
+    let residual_return = total_return - factor_return;
+
+    Ok(FactorAttribution {
+        total_return,
+        factor_return,
+        residual_return,
+        total_risk,
+        factor_risk,
+        specific_risk,
+        factors: factors_contrib,
+        n_periods,
+        n_assets: 1,
         n_factors,
     })
 }

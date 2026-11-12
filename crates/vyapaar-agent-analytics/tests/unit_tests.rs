@@ -1,10 +1,13 @@
 //! Numerical checks for analytics primitives.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 use rust_decimal_macros::dec;
 use vyapaar_agent_analytics::{
     AnalyticsError, EquityStats, PerformanceReport, RoundTrip, TradeStats,
+    compute_factor_attribution, evaluate_walk_forward, simulate_bootstrap, test_engle_granger,
 };
 use vyapaar_core::uuid::Uuid;
 use vyapaar_core::{
@@ -240,4 +243,105 @@ fn performance_report_combines_both() {
     let r = PerformanceReport::from_returns(&trades, &returns, 252.0, 0.0).unwrap();
     assert_eq!(r.trades.n_trades, 2);
     assert_eq!(r.equity.n_periods, 3);
+}
+
+// --- Cointegration Tests ---
+
+#[test]
+fn test_cointegration_detects_cointegrated_pair() {
+    let n = 100;
+    let mut series_x = Vec::with_capacity(n);
+    let mut series_y = Vec::with_capacity(n);
+    let mut x = 100.0;
+
+    for i in 0..n {
+        let step = ((i as f64 * 0.17).sin() * 2.0).round();
+        x += step;
+        let noise = (i as f64 * 0.73).cos() * 0.5;
+        let y = 1.8 * x + 10.0 + noise;
+        series_x.push(x);
+        series_y.push(y);
+    }
+
+    let res = test_engle_granger(&series_x, &series_y).expect("cointegration test");
+    assert!((res.hedge_ratio - 1.8).abs() < 0.1);
+    assert!((res.intercept - 10.0).abs() < 1.0);
+    assert!(res.is_cointegrated);
+    assert!(res.adf_stat < res.crit_value_5pct);
+    assert!(res.p_value < 0.05);
+}
+
+#[test]
+fn test_cointegration_rejects_insufficient_data() {
+    let x = [1.0, 2.0, 3.0];
+    let y = [2.0, 4.0, 6.0];
+    match test_engle_granger(&x, &y) {
+        Err(AnalyticsError::InsufficientData { needed, got }) => {
+            assert_eq!(needed, 8);
+            assert_eq!(got, 3);
+        }
+        other => panic!("expected InsufficientData, got {other:?}"),
+    }
+}
+
+// --- Monte Carlo Tests ---
+
+#[test]
+fn test_monte_carlo_simulate_bootstrap() {
+    let returns = vec![
+        0.01, -0.005, 0.02, -0.01, 0.015, -0.008, 0.012, 0.003, -0.004, 0.009, 0.014, -0.002,
+        0.008, -0.015, 0.022, 0.005, -0.006, 0.011, 0.004, -0.003,
+    ];
+    let res = simulate_bootstrap(&returns, 200, 30);
+    assert_eq!(res.simulations_run, 200);
+    assert!(res.median_max_drawdown >= 0.0);
+    assert!(res.drawdown_95 >= res.median_max_drawdown);
+    assert!(res.drawdown_99 >= res.drawdown_95);
+}
+
+// --- Walk-Forward Tests ---
+
+#[test]
+fn test_walk_forward_evaluation() {
+    let mut returns = Vec::with_capacity(60);
+    for i in 0..60 {
+        returns.push(if i % 2 == 0 { 0.02 } else { -0.005 });
+    }
+    let res = evaluate_walk_forward(&returns, 36, 24);
+    assert!(res.is_annual_return > 0.0);
+    assert!(res.oos_annual_return > 0.0);
+    assert!(res.wfe > 0.0);
+}
+
+// --- Factor Attribution Tests ---
+
+#[test]
+fn test_compute_factor_attribution_regression() {
+    let n = 50;
+    let mut mkt = Vec::with_capacity(n);
+    let mut smb = Vec::with_capacity(n);
+    let mut asset = Vec::with_capacity(n);
+
+    for i in 0..n {
+        let f1 = (i as f64 * 0.2).sin() * 0.02;
+        let f2 = (i as f64 * 0.5).cos() * 0.01;
+        let r = 0.001 + 1.2 * f1 + 0.5 * f2 + ((i as f64).sin() * 0.001);
+        mkt.push(f1);
+        smb.push(f2);
+        asset.push(r);
+    }
+
+    let mut factor_returns = HashMap::new();
+    factor_returns.insert("market".to_string(), mkt);
+    factor_returns.insert("size".to_string(), smb);
+
+    let attr =
+        compute_factor_attribution(&asset, &factor_returns, 252.0).expect("factor attribution");
+    assert_eq!(attr.n_periods, n);
+    assert_eq!(attr.n_factors, 2);
+    assert!(attr.total_risk > 0.0);
+    assert!(attr.factor_risk > 0.0);
+
+    let mkt_factor = attr.factors.iter().find(|f| f.factor == "market").unwrap();
+    assert!((mkt_factor.exposure - 1.2).abs() < 0.25);
 }

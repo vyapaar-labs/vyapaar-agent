@@ -767,3 +767,251 @@ async fn test_gateway_read_result_unknown_ref() {
         panic!("expected error for unknown reference");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Plan 0007 Track 1 Phase 1 Analytics Engine MCP Tools
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_tool_monte_carlo() {
+    let server = McpServer::new();
+    let returns = vec![
+        0.01, -0.005, 0.02, -0.01, 0.015, -0.008, 0.012, 0.003, -0.004, 0.009, 0.014, -0.002,
+        0.008, -0.015, 0.022, 0.005, -0.006, 0.011, 0.004, -0.003,
+    ];
+    let msg = RpcMessage::Request {
+        id: json!(201),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_monte_carlo",
+            "arguments": {
+                "returns": returns,
+                "num_sims": 150,
+                "horizon": 25
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none(), "unexpected error: {:?}", error);
+        let res = result.unwrap();
+        let structured = &res["structuredContent"];
+        assert_eq!(structured["schema"], "vyapaar/result/v1");
+        assert_eq!(structured["status"], "ok");
+        let data = &structured["data"];
+        assert_eq!(data["simulations_run"], 150);
+        assert!(data["median_max_drawdown"].as_f64().unwrap() >= 0.0);
+        assert!(data["drawdown_95"].as_f64().unwrap() >= 0.0);
+        assert!(data["prob_loss"].as_f64().unwrap() >= 0.0);
+
+        // Check MetricGrid
+        let blocks = structured["blocks"].as_array().expect("blocks");
+        assert!(blocks.iter().any(|b| b["type"] == "metric_grid"));
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_tool_cointegration() {
+    let server = McpServer::new();
+    let n = 80;
+    let mut series_x = Vec::with_capacity(n);
+    let mut series_y = Vec::with_capacity(n);
+    let mut x = 100.0;
+    for i in 0..n {
+        let step = ((i as f64 * 0.17).sin() * 2.0).round();
+        x += step;
+        let noise = (i as f64 * 0.73).cos() * 0.5;
+        let y = 1.5 * x + 20.0 + noise;
+        series_x.push(x);
+        series_y.push(y);
+    }
+
+    let msg = RpcMessage::Request {
+        id: json!(202),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_cointegration",
+            "arguments": {
+                "series_x": series_x,
+                "series_y": series_y
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none(), "unexpected error: {:?}", error);
+        let res = result.unwrap();
+        let structured = &res["structuredContent"];
+        assert_eq!(structured["schema"], "vyapaar/result/v1");
+        assert_eq!(structured["status"], "ok");
+        let data = &structured["data"];
+        assert!((data["hedge_ratio"].as_f64().unwrap() - 1.5).abs() < 0.15);
+        assert!(data["is_cointegrated"].as_bool().unwrap());
+        assert!(data["adf_stat"].as_f64().unwrap() < 0.0);
+
+        // Check MetricGrid
+        let blocks = structured["blocks"].as_array().expect("blocks");
+        assert!(blocks.iter().any(|b| b["type"] == "metric_grid"));
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_tool_walk_forward() {
+    let server = McpServer::new();
+    let mut returns = Vec::with_capacity(60);
+    for i in 0..60 {
+        returns.push(if i % 2 == 0 { 0.02 } else { -0.005 });
+    }
+
+    let msg = RpcMessage::Request {
+        id: json!(203),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_walk_forward",
+            "arguments": {
+                "returns": returns,
+                "train_size": 36,
+                "test_size": 24
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none(), "unexpected error: {:?}", error);
+        let res = result.unwrap();
+        let structured = &res["structuredContent"];
+        assert_eq!(structured["schema"], "vyapaar/result/v1");
+        assert_eq!(structured["status"], "ok");
+        let data = &structured["data"];
+        assert!(data["is_annual_return"].as_f64().unwrap() > 0.0);
+        assert!(data["oos_annual_return"].as_f64().unwrap() > 0.0);
+        assert!(data["wfe"].as_f64().unwrap() > 0.0);
+
+        // Check MetricGrid
+        let blocks = structured["blocks"].as_array().expect("blocks");
+        assert!(blocks.iter().any(|b| b["type"] == "metric_grid"));
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_tool_factor_attribution_regression() {
+    let server = McpServer::new();
+    let n = 40;
+    let mut mkt = Vec::with_capacity(n);
+    let mut smb = Vec::with_capacity(n);
+    let mut asset = Vec::with_capacity(n);
+
+    for i in 0..n {
+        let f1 = (i as f64 * 0.2).sin() * 0.02;
+        let f2 = (i as f64 * 0.5).cos() * 0.01;
+        let r = 0.001 + 1.2 * f1 + 0.5 * f2 + ((i as f64).sin() * 0.001);
+        mkt.push(f1);
+        smb.push(f2);
+        asset.push(r);
+    }
+
+    let msg = RpcMessage::Request {
+        id: json!(204),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_factor_attribution",
+            "arguments": {
+                "asset_returns": asset,
+                "factor_returns": {
+                    "market": mkt,
+                    "size": smb
+                },
+                "annualization_factor": 252.0
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none(), "unexpected error: {:?}", error);
+        let res = result.unwrap();
+        let structured = &res["structuredContent"];
+        assert_eq!(structured["schema"], "vyapaar/result/v1");
+        assert_eq!(structured["status"], "ok");
+        let data = &structured["data"];
+        assert_eq!(data["n_factors"], 2);
+        assert_eq!(data["n_periods"], n);
+
+        // Check MetricGrid and Table blocks
+        let blocks = structured["blocks"].as_array().expect("blocks");
+        assert!(blocks.iter().any(|b| b["type"] == "metric_grid"));
+        assert!(blocks.iter().any(|b| b["type"] == "table"));
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_gateway_search_tools_analytics_category() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(205),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_search_tools",
+            "arguments": {
+                "query": "monte",
+                "category": "analytics"
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none());
+        let res = result.unwrap();
+        let data = &res["structuredContent"]["data"];
+        assert_eq!(data["category"], "analytics");
+        let tools = data["tools"].as_array().expect("tools array");
+        assert!(tools.iter().any(|t| t["name"] == "vyapaar_monte_carlo"));
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_gateway_describe_tool_analytics() {
+    let server = McpServer::new();
+    for tool_name in &[
+        "vyapaar_monte_carlo",
+        "vyapaar_cointegration",
+        "vyapaar_walk_forward",
+        "vyapaar_factor_attribution",
+    ] {
+        let msg = RpcMessage::Request {
+            id: json!(206),
+            method: "tools/call".to_string(),
+            params: json!({
+                "name": "vyapaar_describe_tool",
+                "arguments": {
+                    "tool_name": tool_name
+                }
+            }),
+        };
+
+        let resp = server.handle_message(&msg).await.expect("response");
+        if let RpcMessage::Response { result, error, .. } = resp {
+            assert!(error.is_none());
+            let res = result.unwrap();
+            let data = &res["structuredContent"]["data"];
+            assert_eq!(data["tool_name"], *tool_name);
+            assert!(data["schema"]["inputSchema"].is_object());
+        } else {
+            panic!("unexpected response type");
+        }
+    }
+}
