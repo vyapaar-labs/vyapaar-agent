@@ -4,38 +4,40 @@
 
 ## Phase / Slice Status
 
-- **Plan 0006 (MCP/chat tool catalog expansion) — complete: Phases 1–4 implemented
-  (2026-11-11/12)**; recorded in `docs/plans/README.md` Implemented table (doc removed from
-  active `docs/plans/` per gap-tracking §4). **Phase 4 (2026-11-12)**: research-verified
-  upstream first (plan §4's mandated re-check, 1 explore subagent) — `vyapaar-market` has
-  contract-reference/Greeks building blocks but no chain reader, and `vyapaar-data`'s
-  corporate-actions reader **does** exist Python-side (the plan's "no reader" assumption was
-  stale; verified against `DuckDbCorporateActionsStore` + `CorporateActionsRepository`). Gaps
-  filed before any tool code: `vyapaar-market/docs/gaps/0001-options-chain-reader.md` (that
-  repo's first), `vyapaar-data/docs/gaps/0008-corporate-actions-rust-bridge.md` +
-  `0009-corporate-actions-ingestion.md`. Landed: `OptionContract`/`OptionsChain`/
-  `CorporateAction` DTOs + `MarketReader::options_chain`/`corporate_actions` port methods;
-  `options_chain` + `corporate_actions` tools in `src/market.rs` (both ReadOnly, main bundle —
-  catalogue **17 → 19**, count test bumped); runtime side `FeedMarketReader` honest stubs +
-  seedable `RuntimeMarketReader` stores. Boy-scout: `BlockDeal`/`BlockDealsInput`/
-  `BlockDealsTool` now re-exported at crate root (Phase 1 omission).
-- **Phase 1–3 recap (2026-11-11/12)** — Phase 1 `BlockDealsTool`, Phase 2 `PriceAlertTool` CRUD
-  (`LocalWrite`, separate alert bundle), Phase 3 `news_search`/`filings_search` via the
-  `ContentReader` port (runtime stubs citing `vyapaar-data` gaps 0006/0007); details in the
-  plans README + git history.
-- **Plans 0001–0005**: complete and merged — see `docs/plans/README.md` Implemented table
-  (0004's Phase 4 local-SLM deferral and plan 0005 QLoRA/BLAS notes live there, not here).
+- **Docs overhaul (2026-11-12)**: the historical `docs/roadmap/` was dismantled into
+  `docs/design/`, `docs/gaps/`, `docs/plans/` and the whole set rewritten to match the source.
+  - Design: `architecture.md` now 17 crates (chat-tools, forecast, panel real); new
+    `code-chat-tools.md`; migration map all-complete; guardrails note the 2 remaining inline
+    `#[cfg(test)]` blocks; `code-engines.md` corrected (analytics `cointegration.rs` +
+    `tearsheet.rs` are orphaned files not declared in `lib.rs`).
+  - Gaps: **0002 closed** (chat-tools crate, commit `f3f1cdc`); 0001 widened to two files
+    (`ref_store.rs` + `research/verify/mod.rs`); 0003–0007 still open with corrected scopes
+    (jobs scheduler exists — gap 0006 is now only the runtime-side bridge).
+  - Plans: active plans renumbered to fix a numbering collision — **0008** (TDD cleanup, gap
+    0001) and **0009** (persistent memory/MCP client/Phase E, gaps 0003–0007) replace the old
+    `0002`/`0003` files; **0007** (MCP master guide) unchanged except status header (Phase 16
+    SSE transport noted shipped).
+- **Plan 0006 (MCP/chat tool catalog expansion) — complete**: Phases 1–4 implemented
+  (2026-11-11/12) and recorded in `docs/plans/README.md` Implemented table. Full detail in the
+  README + git history; catalogue is 19 read-only + 2 alert + 3 strategy tools.
+- **Plans 0001–0005**: complete and merged — see `docs/plans/README.md` Implemented table.
 
 ## Immediate Next Step
 
-Plan 0006 is complete. Catalogue is **19 read-only + 2 alert + 3 strategy** tools; plan 0006
-§2's flat-registry decision stands (revisit at ~40). Future chat-tool breadth continues under
-active plan 0007; the open data blockers for the newest tools are the filed upstream gaps —
-`vyapaar-market/docs/gaps/0001` (chain reader), `vyapaar-data/docs/gaps/0008`+`0009`
-(bridge + ingestion) — alongside the standing 0005/0006/0007 ingestion/bridge gaps.
+- **Gap 0001** (inline `#[cfg(test)]` in `ref_store.rs` + `research/verify/mod.rs`) → plan
+  0008; quickest close: move tests to `tests/`, verify `grep -rn "#\[cfg(test)\]"
+  crates/*/src/` is empty, then update `code-guardrails.md`/`code-migration-map.md`.
+- Persistent memory & Phase E work continues under plan 0009 (gaps 0003–0007).
+- Future chat-tool/MCP breadth continues under active plan 0007; open data blockers are the
+  filed upstream gaps — `vyapaar-market/docs/gaps/0001` (chain reader),
+  `vyapaar-data/docs/gaps/0008`+`0009` (bridge + ingestion) — alongside the standing
+  `vyapaar-data` 0005/0006/0007 ingestion/bridge gaps.
 
 ## Decisions & Discoveries
 
+- Plan numbering collision fixed: active plans 0008/0009 replace the reused `0002`/`0003`
+  numbers (implemented plans 0001–0006 keep theirs). Gap 0002 closed in the index; gap
+  numbers are never reused per `.agents/rules/gap-tracking.md`.
 - Chat catalogue: **19 read-only tools** (`test_total_read_only_catalogue_count` pins the count)
   **plus** the 2-tool alert bundle and 3 strategy tools. Content (Phase 3) and
   options-chain/corporate-actions (Phase 4) tools all went into the main all-ReadOnly bundle

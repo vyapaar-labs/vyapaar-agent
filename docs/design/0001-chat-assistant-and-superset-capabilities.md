@@ -1,22 +1,37 @@
 # 0001 — Conversational Assistant & Superset Capabilities for `vyapaar-agent`
 
-> **Status**: Proposed (design only — nothing in this document is implemented).
+> **Status**: Partially implemented.
+> - **Phase A (implemented)**: `vyapaar-agent-chat` (turn state machine, session actor,
+>   permissions engine, headless runner, checkpoints), `vyapaar-agent-chat-tools` (read ports,
+>   `PureToolAdapter`, 19 read-only + 2 alert + 3 strategy advisory tools), `SessionStore` /
+>   `MemoryStore` ports, `PromptAssembly` (cached-prefix / turn-context placement),
+>   `vyapaar-agent-mcp` Stdio + SSE transports, and the `vyapaar-agent-core` job scheduler.
+> - **Open work is tracked as gaps, not as this document**: `UserMemory` (gap 0003), MCP stdio
+>   client bridge (gap 0004), `ResearchNote` (gap 0005), runtime monitor-scheduler bridge
+>   (gap 0006), prompt cache-hit regression tests (gap 0007), inline-test cleanup (gap 0001).
+>   See `docs/gaps/README.md` and `docs/plans/README.md`.
 > **Owner repo**: `vyapaar-agent`. **Also touches**: `vyapaar-runtime` (recommendations only, §9 and §15.3), `vyapaar-ledger` and `vyapaar-core` (boundary statements only, no changes requested), `vyapaar-ui` (consumer of the API defined here).
 > **Supersedes**: the open questions in `vyapaar-ui/docs/plans/0001-agent-chat-terminal-from-artha.md` §6, and the "`AgentTool` purity" caveat in §2/§3 of the same doc.
-> **Authoritative context**: `vyapaar-agent/docs/design/architecture.md` (13-crate topology, NoFX principle), `vyapaar-agent/docs/design/code-migration-map.md`, `vyapaar-runtime/docs/design/code-migration-map.md`, `vyapaar-runtime/docs/design/architecture.md`, `docs/roadmap/roadmap.md`.
+> **Authoritative context**: `vyapaar-agent/docs/design/architecture.md` (17-crate topology, NoFX principle), `vyapaar-agent/docs/design/code-migration-map.md`, `vyapaar-runtime/docs/design/code-migration-map.md`, `vyapaar-runtime/docs/design/architecture.md`.
 
 ---
 
 > ## ⛔ Implementation gate — read before writing any code
 >
-> **This design MUST NOT be implemented until both of the following roadmap milestones are complete and verified** (all boxes checked in `docs/roadmap/roadmap.md`, and each repo's `docs/roadmap/migration-verification.md` verification commands passing on `main`):
+> **Phase A of this design has been implemented** and merged. The gate below applied to the
+> original port-era implementation; later phases (persistent memory, MCP client, research
+> notes, monitors) were intentionally deferred until the ported foundation had stabilised.
+> Those phases are now tracked as gaps in `docs/gaps/` and planned in `docs/plans/` (0009)
+> and **0007** — the historical roadmap file these boxes lived in
+> (`docs/roadmap/roadmap.md`) has been dismantled into `docs/design/`, `docs/gaps/`, and
+> `docs/plans/`.
+>
+> The original gate, for the record:
 >
 > 1. **Milestone 3.1** — `vyapaar-agent` migrated from `honba-nou` (10 ported crates) plus the three originally-scoped new crates (`vyapaar-agent-tools`, `vyapaar-agent-plugins`, `vyapaar-agent-report`) in their **original, narrow** scope.
 > 2. **Milestone 3.2** — `vyapaar-runtime` migrated from `honba-ya` (9 ported crates) plus `vyapaar-runtime-jobs` in its **original, narrow** scope.
 >
-> Everything below describes what to build **after** the ported foundation has landed and stabilised — not concurrently with it. The port is a moving target: trait signatures in `vyapaar-agent-core`, the `honba-nou-agent` state machine, `vyapaar-runtime-persistence`'s repository implementations and `vyapaar-runtime-jobs`' `JobSpec` will all be in flux during 3.1/3.2. Building on them mid-port guarantees merge conflicts and rework. Where this document names a ported type (`PromptBuilder`, `LlmProvider`, `JobSpec`, `OrderRepository`, …) it describes the **intended extension**, and §14 lists the facts that must be re-verified against the landed code before implementation starts.
->
-> Milestone 1.3 (`vyapaar-ledger`) is a transitive prerequisite (3.2 depends on it) and is therefore implied.
+> Where this document names a ported type (`PromptBuilder`, `LlmProvider`, `JobSpec`, `OrderRepository`, …) it describes the **intended extension**, and §14 lists the facts that must be re-verified against the landed code before implementation starts.
 
 ---
 

@@ -24,6 +24,7 @@ COMPLETED).
 - Max rounds, 64 KiB tool outcome truncation, write-ahead persistence, repeat-error nudge,
   synthetic cancellation repair.
 - Channel-based `SessionActor` / `SessionHandle` dispatching typed `SessionEvent` streams.
+- Session checkpoints (`Checkpoint`, `ExportFormat`, `SessionCheckpointer`) for resume/export.
 
 ## Permissions Engine
 
@@ -38,16 +39,17 @@ COMPLETED).
 
 `vyapaar-agent-chat` must NOT depend on `vyapaar-runtime-*`, `vyapaar-exec-*`, or
 `vyapaar-market-*` (architecture R1–R3). External reads are inverted through ports in
-`vyapaar-agent-core::ports`. Regression-tested via `tests/dependency_rules.rs` inspecting
-`cargo metadata`.
+`vyapaar-agent-chat-tools::ports`. Regression-tested via `tests/dependency_rules.rs`
+inspecting `cargo metadata`.
 
 ## Untrusted AI Principle
 
-Chat turns never produce a trade or bypass the `DecisionValidator → PriceBand → RiskEngine`
+Chat turns never produce a trade or bypass the `DecisionParser → PriceBand → RiskEngine`
 pipeline.
 
 ## Related
 
-- `vyapaar-agent-tools` — pure `AgentTool` registry (lifted into chat via `PureToolAdapter`;
-  the lift crate `vyapaar-agent-chat-tools` is planned — gap 0002).
+- `vyapaar-agent-chat-tools` — the conversational tool catalogue and read ports; pure
+  `AgentTool`s are lifted via `PureToolAdapter` (see `code-chat-tools.md`).
 - `vyapaar-agent-core::prompt` — chat base prompts & section renderers.
+- Design Doc 0001 — conversational assistant & superset capabilities.

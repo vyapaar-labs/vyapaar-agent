@@ -44,7 +44,13 @@ Modules: `memory/mod.rs`.
 
 No higher-level `UserMemory` abstraction with per-user profile budgeters and recall-section
 renderers exists yet. Ports and in-memory engine are present; `UserMemory` is planned
-(`docs/plans/0003-persistent-memory-and-mcp-client.md`, gap 0003).
+(`docs/gaps/0003-persistent-memory-not-implemented.md`, tracked by plan 0009).
+
+## Note (gap 0006)
+
+The agent-side job scheduler is implemented. What is missing is the runtime-side bridge that
+schedules and monitors agent jobs through `vyapaar-runtime`'s actor pipeline
+(`docs/gaps/0006-monitor-scheduler-bridge.md`, tracked by plan 0009).
 
 ## Related
 

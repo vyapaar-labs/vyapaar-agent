@@ -38,7 +38,7 @@ either varies (cache miss).
 ## Note (gap 0007)
 
 No cache-hit/cache-miss regression tests exist yet for prompt caching. See
-`docs/plans/0003-persistent-memory-and-mcp-client.md`, gap 0007.
+`docs/gaps/0007-prompt-cache-regression-tests.md` (tracked by plan 0009).
 
 ## Related
 

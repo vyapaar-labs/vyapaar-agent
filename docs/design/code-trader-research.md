@@ -48,9 +48,10 @@ Autonomous hypothesis generation, factor discovery, and walk-forward experiment 
 | `backtest.rs` | Backtest execution for research |
 | `enhancer.rs` | Automatic strategy enhancement (GA / Bayesian / WFO / DSR) |
 | `hypothesis.rs` | Hypothesis generation |
-| `llm.rs` | LLM-assisted research |
+| `llm.rs` | LLM-assisted research (`ResearchLlm`) |
 | `manifest.rs` | Experiment manifest |
-| `verify/mod.rs` | Static strategy verifier |
+| `verification.rs` | Hypothesis/strategy verification driver |
+| `verify/mod.rs` | Static strategy verifier (contains inline `#[cfg(test)]` — see gap 0001) |
 
 ## Untrusted AI Principle
 

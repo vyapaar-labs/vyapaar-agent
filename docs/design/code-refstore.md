@@ -48,8 +48,10 @@ serialised to the model as JSON strings so precision survives the wire (matching
 
 This file currently contains an inline `#[cfg(test)] mod tests` block (four unit tests),
 which violates the workspace TDD rule forbidding in-file `#[test]` in production `src/`.
-These tests are to be moved to `crates/vyapaar-agent-core/tests/ref_store_tests.rs`
-(see `docs/plans/0002-tdd-cleanup-and-chat-tools.md`, gap 0001).
+These tests are to be moved to `crates/vyapaar-agent-core/tests/ref_store_tests.rs`.
+A second inline `#[cfg(test)]` block exists in
+`crates/vyapaar-agent-research/src/verify/mod.rs`; both violations are tracked as
+**gap 0001** and planned in **plan 0008** (see `docs/gaps/0001-inline-tests-in-ref-store.md`).
 
 ## Related
 

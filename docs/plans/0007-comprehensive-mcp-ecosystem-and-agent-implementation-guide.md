@@ -2,6 +2,7 @@
 
 **Status**: Active / Master Architecture Guide  
 **Target Scope**: Workspace-wide (`vyapaar-agent-mcp`, `vyapaar-agent-chat-tools`, `vyapaar-agent-analytics`, `vyapaar-ledger`, `vyapaar-market`, `vyapaar-strategies`, `vyapaar-runtime`, `vyapaar-data`)  
+**Implementation status (2026-11)**: Phase 16 (Axum SSE / HTTP transport — `vyapaar-agent-mcp/src/transport.rs`) already shipped; **all other phases are open**. The related chat-tool breadth delivered under implemented plan 0006 (block deals, price alerts, news/filings, options chain, corporate actions) covers parts of categories 4/5/10 in the coverage matrix. Phase 17 (MCP stdio client bridge) is tracked as gap 0004 under plan 0009. Phases are not gap-tracked individually yet; when a phase begins, file the phase as one or more gaps in `docs/gaps/` before writing code.
 **Benchmark References**:
 - **Longbridge MCP Server** (`longbridge/longbridge-mcp`) — 164 tools across 20 categories, Rust `rmcp` + `axum`, universal `_jq` filter, confirmation-code workflow for writes, paper-trading sandbox.
 - **Fincept Platform MCP** (`docs.fincept.in`) — 17 quantitative engines (Stats, Forecast, Optimizer, Allocation, Volatility/GARCH, Panel, Scanner, Change Points, Regimes/HMM, Copulas, MPO, Portfolio Lab, Pricing, Performance), two-tier discovery (`search_tools`, `describe_tool`, `call_tool`, `read_result`), reference store.
