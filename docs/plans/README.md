@@ -13,6 +13,7 @@ Per workspace rule `.agents/rules/gap-tracking.md`:
 | [0007](0007-comprehensive-mcp-ecosystem-and-agent-implementation-guide.md) | Comprehensive MCP Ecosystem Implementation Guide & Feature Coverage Audit | `vyapaar-agent-mcp`, `vyapaar-agent-chat-tools`, `vyapaar-agent-analytics`, `vyapaar-ledger`, `vyapaar-market`, `vyapaar-strategies`, `vyapaar-runtime`, `vyapaar-data` | Active — master guide (Longbridge 164 tools, Fincept 17 engines, jesse-mcp 32 tools); Phases 1–15 and 17 open; Phase 16 (SSE transport) shipped; Phase 17 = gap 0004 |
 | [0008](0008-tdd-cleanup-inline-tests.md) | TDD Cleanup: Remove Inline Tests from `src/` | `vyapaar-agent-core`, `vyapaar-agent-research` | Open — tracks gap 0001 (two inline `#[cfg(test)]` blocks remain) |
 | [0009](0009-persistent-memory-mcp-client-and-phase-e.md) | Persistent Memory, MCP Client Bridge & Phase E | `vyapaar-agent-core`, `vyapaar-agent-prompt`, `vyapaar-agent-mcp`, `vyapaar-agent-report`, `vyapaar-agent-research` | Open — tracks gaps 0003–0007 |
+| [0010](0010-institutional-smart-money-detection-suite.md) | Institutional / Smart-Money Flow Detection Suite | `vyapaar-agent-chat-tools`, `vyapaar-runtime-api(-rest)`, `vyapaar-strategies` | Proposed — composite signal (delivery-adjusted volume, shareholding/insider filings, block deals, OI buildup) over 3 new chat tools; depends on new upstream gaps `vyapaar-data` 0013/0014 and `vyapaar-market` 0002 |
 
 ## Implemented Plans
 

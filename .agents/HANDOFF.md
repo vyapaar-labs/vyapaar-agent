@@ -33,6 +33,13 @@
   `vyapaar-data/docs/gaps/0008`+`0009` (bridge + ingestion) — alongside the standing
   `vyapaar-data` 0005/0006/0007 ingestion/bridge gaps.
 
+New **plan 0010** (proposed, 2026-11-12): institutional/smart-money flow detection suite —
+`institutional_flows`, `delivery_analysis`, `oi_buildup` tools (catalogue would go 19 → 22) plus
+a composite-signal strategy in `vyapaar-strategies`. Filed two new upstream gaps alongside the
+plan: `vyapaar-data/docs/gaps/0013` (FII/DII flows), `vyapaar-data/docs/gaps/0014` (delivery %);
+and `vyapaar-market/docs/gaps/0002` (OI history/buildup, sequenced after that repo's 0001). No
+tool/port code written yet — plan is scoping-only pending go-ahead.
+
 ## Decisions & Discoveries
 
 - Plan numbering collision fixed: active plans 0008/0009 replace the reused `0002`/`0003`
