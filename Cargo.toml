@@ -55,6 +55,7 @@ vyapaar-ledger-journal = { path = "../vyapaar-ledger/crates/vyapaar-ledger-journ
 vyapaar-ledger-allocation = { path = "../vyapaar-ledger/crates/vyapaar-ledger-allocation" }
 vyapaar-market-core = { path = "../vyapaar-market/crates/vyapaar-market-core" }
 vyapaar-market-finance = { path = "../vyapaar-market/crates/vyapaar-market-finance" }
+vyapaar-market-pricing = { path = "../vyapaar-market/crates/vyapaar-market-pricing" }
 vyapaar-market-feed = { path = "../vyapaar-market/crates/vyapaar-market-feed" }
 vyapaar-market-store = { path = "../vyapaar-market/crates/vyapaar-market-store" }
 vyapaar-market-normalizer = { path = "../vyapaar-market/crates/vyapaar-market-normalizer" }

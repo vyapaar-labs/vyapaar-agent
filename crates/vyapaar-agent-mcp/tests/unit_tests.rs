@@ -1350,3 +1350,356 @@ async fn test_gateway_describe_tool_allocation() {
         panic!("unexpected response type");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Plan 0007 Track 1 Phase 3 Derivatives Pricing & Volatility MCP Tools
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_tool_price_derivatives_call() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(401),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_price_derivatives",
+            "arguments": {
+                "spot": 100.0,
+                "strike": 100.0,
+                "t_years": 1.0,
+                "risk_free_rate": 0.05,
+                "volatility": 0.20,
+                "option_type": "call"
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none(), "unexpected error: {:?}", error);
+        let res = result.unwrap();
+        let structured = &res["structuredContent"];
+        assert_eq!(structured["schema"], "vyapaar/result/v1");
+        assert_eq!(structured["status"], "ok");
+
+        let data = &structured["data"];
+        assert_eq!(data["option_type"], "call");
+        assert_eq!(data["moneyness"], "ATM");
+
+        let price: f64 = data["price"].as_str().unwrap().parse().unwrap();
+        let delta: f64 = data["delta"].as_str().unwrap().parse().unwrap();
+        let gamma: f64 = data["gamma"].as_str().unwrap().parse().unwrap();
+        let vega: f64 = data["vega"].as_str().unwrap().parse().unwrap();
+        let theta: f64 = data["theta"].as_str().unwrap().parse().unwrap();
+        let rho: f64 = data["rho"].as_str().unwrap().parse().unwrap();
+
+        // Standard Black-Scholes call (S=100, K=100, T=1, r=0.05, vol=0.20): price ≈ 10.45, delta ≈ 0.637
+        assert!(price > 10.0 && price < 11.0, "price was {}", price);
+        assert!(delta > 0.60 && delta < 0.68, "delta was {}", delta);
+        assert!(gamma > 0.0, "gamma must be positive");
+        assert!(vega > 0.0, "vega must be positive");
+        assert!(theta < 0.0, "theta must be negative");
+        assert!(rho > 0.0, "call rho must be positive");
+
+        let blocks = structured["blocks"].as_array().expect("blocks array");
+        assert_eq!(blocks.len(), 2);
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_tool_price_derivatives_put() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(402),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_price_derivatives",
+            "arguments": {
+                "spot": 100.0,
+                "strike": 105.0,
+                "t_years": 0.5,
+                "risk_free_rate": 0.05,
+                "volatility": 0.20,
+                "option_type": "put",
+                "dividend_yield": 0.01
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none(), "unexpected error: {:?}", error);
+        let res = result.unwrap();
+        let structured = &res["structuredContent"];
+        assert_eq!(structured["status"], "ok");
+
+        let data = &structured["data"];
+        assert_eq!(data["option_type"], "put");
+        assert_eq!(data["moneyness"], "ITM");
+
+        let price: f64 = data["price"].as_str().unwrap().parse().unwrap();
+        let delta: f64 = data["delta"].as_str().unwrap().parse().unwrap();
+        let intrinsic: f64 = data["intrinsic_value"].as_str().unwrap().parse().unwrap();
+
+        assert_eq!(intrinsic, 5.0);
+        assert!(price >= 5.0, "ITM put price must exceed intrinsic value");
+        assert!(delta < 0.0 && delta > -1.0, "put delta must be in (-1, 0)");
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_tool_price_derivatives_validation_errors() {
+    let server = McpServer::new();
+
+    // 1. Negative spot
+    let msg_neg_spot = RpcMessage::Request {
+        id: json!(403),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_price_derivatives",
+            "arguments": {
+                "spot": -100.0,
+                "strike": 100.0,
+                "t_years": 1.0,
+                "risk_free_rate": 0.05,
+                "volatility": 0.20,
+                "option_type": "call"
+            }
+        }),
+    };
+    let resp = server.handle_message(&msg_neg_spot).await.expect("response");
+    if let RpcMessage::Response { error, .. } = resp {
+        assert!(error.is_some(), "expected error for negative spot");
+    }
+
+    // 2. Invalid option type
+    let msg_bad_type = RpcMessage::Request {
+        id: json!(404),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_price_derivatives",
+            "arguments": {
+                "spot": 100.0,
+                "strike": 100.0,
+                "t_years": 1.0,
+                "risk_free_rate": 0.05,
+                "volatility": 0.20,
+                "option_type": "straddle"
+            }
+        }),
+    };
+    let resp2 = server.handle_message(&msg_bad_type).await.expect("response");
+    if let RpcMessage::Response { error, .. } = resp2 {
+        assert!(error.is_some(), "expected error for invalid option_type");
+    }
+}
+
+#[tokio::test]
+async fn test_tool_garch_volatility() {
+    let server = McpServer::new();
+    let mut returns = Vec::new();
+    for i in 0..100 {
+        let scale = if (30..60).contains(&i) { 0.025 } else { 0.007 };
+        let sign = if i % 2 == 0 { 1.0 } else { -1.0 };
+        returns.push(sign * scale);
+    }
+
+    let msg = RpcMessage::Request {
+        id: json!(405),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_garch_volatility",
+            "arguments": {
+                "returns": returns,
+                "p": 1,
+                "q": 1,
+                "forecast_horizon": 5,
+                "annualization": 252.0
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none(), "unexpected error: {:?}", error);
+        let res = result.unwrap();
+        let structured = &res["structuredContent"];
+        assert_eq!(structured["schema"], "vyapaar/result/v1");
+        assert_eq!(structured["status"], "ok");
+
+        let data = &structured["data"];
+        let persistence = data["persistence"].as_f64().unwrap();
+        let alpha = data["alpha"].as_f64().unwrap();
+        let beta = data["beta"].as_f64().unwrap();
+        let omega = data["omega"].as_f64().unwrap();
+        let forecasts = data["forecast_volatilities"].as_array().unwrap();
+
+        assert!(persistence > 0.0 && persistence < 1.0);
+        assert!(alpha > 0.0);
+        assert!(beta > 0.0);
+        assert!(omega > 0.0);
+        assert_eq!(forecasts.len(), 5);
+
+        let blocks = structured["blocks"].as_array().expect("blocks");
+        assert_eq!(blocks.len(), 2);
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_tool_garch_volatility_validation_errors() {
+    let server = McpServer::new();
+
+    // 1. Missing returns
+    let msg_missing = RpcMessage::Request {
+        id: json!(406),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_garch_volatility",
+            "arguments": {}
+        }),
+    };
+    let resp = server.handle_message(&msg_missing).await.expect("response");
+    if let RpcMessage::Response { error, .. } = resp {
+        assert!(error.is_some(), "expected error for missing returns");
+    }
+
+    // 2. Insufficient data
+    let msg_short = RpcMessage::Request {
+        id: json!(407),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_garch_volatility",
+            "arguments": {
+                "returns": [0.01, -0.01, 0.02]
+            }
+        }),
+    };
+    let resp2 = server.handle_message(&msg_short).await.expect("response");
+    if let RpcMessage::Response { error, .. } = resp2 {
+        assert!(error.is_some(), "expected error for insufficient data");
+    }
+}
+
+#[tokio::test]
+async fn test_gateway_search_tools_derivatives_category() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(408),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_search_tools",
+            "arguments": {
+                "query": "derivatives",
+                "category": "derivatives"
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none());
+        let res = result.unwrap();
+        let data = &res["structuredContent"]["data"];
+        assert_eq!(data["category"], "derivatives");
+        let tools = data["tools"].as_array().expect("tools array");
+        assert!(
+            tools
+                .iter()
+                .any(|t| t["name"] == "vyapaar_price_derivatives")
+        );
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_gateway_search_tools_volatility_category() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(409),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_search_tools",
+            "arguments": {
+                "query": "garch",
+                "category": "volatility"
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none());
+        let res = result.unwrap();
+        let data = &res["structuredContent"]["data"];
+        assert_eq!(data["category"], "volatility");
+        let tools = data["tools"].as_array().expect("tools array");
+        assert!(
+            tools
+                .iter()
+                .any(|t| t["name"] == "vyapaar_garch_volatility")
+        );
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_gateway_describe_tool_derivatives() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(410),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_describe_tool",
+            "arguments": {
+                "tool_name": "vyapaar_price_derivatives"
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none());
+        let res = result.unwrap();
+        let data = &res["structuredContent"]["data"];
+        assert_eq!(data["tool_name"], "vyapaar_price_derivatives");
+        assert_eq!(data["schema"]["category"], "derivatives");
+        assert!(data["schema"]["inputSchema"].is_object());
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_gateway_describe_tool_volatility() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(411),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_describe_tool",
+            "arguments": {
+                "tool_name": "vyapaar_garch_volatility"
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none());
+        let res = result.unwrap();
+        let data = &res["structuredContent"]["data"];
+        assert_eq!(data["tool_name"], "vyapaar_garch_volatility");
+        assert_eq!(data["schema"]["category"], "volatility");
+        assert!(data["schema"]["inputSchema"].is_object());
+    } else {
+        panic!("unexpected response type");
+    }
+}

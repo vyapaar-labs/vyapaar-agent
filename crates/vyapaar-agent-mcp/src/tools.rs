@@ -12,10 +12,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use vyapaar_agent_analytics::{
-    FactorReturnPanel, PortfolioHolding, compute_factor_attribution, evaluate_walk_forward,
-    factor_attribution_blocks, fit_cross_sectional_factor_model, simulate_bootstrap,
-    test_engle_granger,
+    FactorReturnPanel, PortfolioHolding, compute_factor_attribution,
+    evaluate_walk_forward, factor_attribution_blocks, fit_cross_sectional_factor_model,
+    fit_garch11, simulate_bootstrap, test_engle_granger,
 };
+pub use vyapaar_agent_analytics::{GarchConfig, GarchResult};
 
 use chrono::Utc;
 use rust_decimal::Decimal;
@@ -28,8 +29,9 @@ use vyapaar_agent_core::indicators::{
 };
 use vyapaar_agent_core::{DisplayBlock, MetricItem, VyapaarResultEnvelope};
 use vyapaar_agent_forecast::{ForecastConfig, ForecastModel, fit_and_forecast};
-use vyapaar_core::{Exchange, InstrumentId, QuantSeries};
+use vyapaar_core::{Exchange, InstrumentId, OptionType, Price, QuantSeries};
 use vyapaar_ledger_allocation::{AllocationError, AllocationObjective, Constraint, PortfolioState};
+use vyapaar_market_pricing::{BlackScholesModel, PriceParams, PricingModel};
 use vyapaar_risk::RiskEngine;
 
 use crate::error::McpError;
@@ -439,6 +441,83 @@ pub fn list_tool_definitions() -> Vec<serde_json::Value> {
                 "required": ["covariance_matrix"]
             }
         }),
+        json!({
+            "name": "vyapaar_price_derivatives",
+            "category": "derivatives",
+            "description": "Prices European options and computes complete analytical Greeks (Delta, Gamma, Vega, Theta, Rho) via Black-Scholes-Merton model",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "spot": {
+                        "type": "number",
+                        "description": "Current price of the underlying asset (strictly positive)"
+                    },
+                    "strike": {
+                        "type": "number",
+                        "description": "Strike price of the option contract (strictly positive)"
+                    },
+                    "t_years": {
+                        "type": "number",
+                        "description": "Time to expiration in years (strictly positive, e.g. 0.25 for 3 months)"
+                    },
+                    "risk_free_rate": {
+                        "type": "number",
+                        "description": "Annualized continuously compounded risk-free rate (e.g. 0.065 for 6.5%)"
+                    },
+                    "volatility": {
+                        "type": "number",
+                        "description": "Annualized volatility of underlying (strictly positive, e.g. 0.20 for 20%)"
+                    },
+                    "option_type": {
+                        "type": "string",
+                        "enum": ["call", "put"],
+                        "description": "Type of option: 'call' or 'put'"
+                    },
+                    "dividend_yield": {
+                        "type": "number",
+                        "default": 0.0,
+                        "description": "Annualized continuously compounded dividend yield (default 0.0)"
+                    }
+                },
+                "required": ["spot", "strike", "t_years", "risk_free_rate", "volatility", "option_type"]
+            }
+        }),
+        json!({
+            "name": "vyapaar_garch_volatility",
+            "category": "volatility",
+            "description": "Fits GARCH(1,1) volatility model to returns series and computes conditional volatility forecasts, half-life, and persistence",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "returns": {
+                        "type": "array",
+                        "items": { "type": "number" },
+                        "description": "Array of historical return observations"
+                    },
+                    "p": {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "ARCH lag order (default 1)"
+                    },
+                    "q": {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "GARCH lag order (default 1)"
+                    },
+                    "forecast_horizon": {
+                        "type": "integer",
+                        "default": 5,
+                        "description": "Number of periods ahead to forecast conditional volatility (default 5)"
+                    },
+                    "annualization": {
+                        "type": "number",
+                        "default": 252.0,
+                        "description": "Annualization factor (e.g. 252.0 for daily trading sessions)"
+                    }
+                },
+                "required": ["returns"]
+            }
+        }),
         // --- Two-Tier Gateway Discovery Protocol ---
         json!({
             "name": "vyapaar_search_tools",
@@ -453,7 +532,7 @@ pub fn list_tool_definitions() -> Vec<serde_json::Value> {
                     },
                     "category": {
                         "type": "string",
-                        "enum": ["market", "technicals", "scanner", "analytics", "allocation", "regimes", "volatility", "research", "ledger", "discovery", "all"],
+                        "enum": ["market", "technicals", "scanner", "analytics", "allocation", "derivatives", "regimes", "volatility", "research", "ledger", "discovery", "all"],
                         "default": "all",
                         "description": "Filter results by tool category"
                     }
@@ -1090,6 +1169,363 @@ impl ForecastService {
                         value: point_count.to_string(),
                     },
                 ],
+            });
+
+        serde_json::to_value(envelope).map_err(McpError::Json)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Derivatives & Greeks Pricing Service (Phase 3)
+// ---------------------------------------------------------------------------
+
+/// Detailed Black-Scholes pricing and analytical Greeks result.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DerivativesPricingResult {
+    /// Option contract type ("call" or "put").
+    pub option_type: String,
+    /// Underlying spot price.
+    pub spot: Decimal,
+    /// Option strike price.
+    pub strike: Decimal,
+    /// Time to expiration in years.
+    pub t_years: Decimal,
+    /// Annualized risk-free rate.
+    pub risk_free_rate: Decimal,
+    /// Annualized continuous dividend yield.
+    pub dividend_yield: Decimal,
+    /// Annualized volatility.
+    pub volatility: Decimal,
+    /// Fair value price of the option contract.
+    pub price: Decimal,
+    /// Delta (∂price/∂spot).
+    pub delta: Decimal,
+    /// Gamma (∂²price/∂spot²).
+    pub gamma: Decimal,
+    /// Theta (∂price/∂time) in currency units per year.
+    pub theta: Decimal,
+    /// Theta per calendar trading day (theta / 252).
+    pub theta_daily: Decimal,
+    /// Vega (∂price/∂volatility) per 100% volatility.
+    pub vega: Decimal,
+    /// Vega per 1 percentage point move in volatility (vega / 100).
+    pub vega_percent: Decimal,
+    /// Rho (∂price/∂rate) per 100% interest rate.
+    pub rho: Decimal,
+    /// Rho per 1 percentage point move in interest rate (rho / 100).
+    pub rho_percent: Decimal,
+    /// Moneyness state: "ITM" (In The Money), "ATM" (At The Money), "OTM" (Out of The Money).
+    pub moneyness: String,
+    /// Intrinsic value of the option contract.
+    pub intrinsic_value: Decimal,
+    /// Extrinsic / time value of the option contract (price - intrinsic_value).
+    pub time_value: Decimal,
+}
+
+/// Derivatives Pricing Service for European options and Greeks calculations.
+#[derive(Clone, Debug, Default)]
+pub struct DerivativesToolService;
+
+impl DerivativesToolService {
+    /// Creates a new derivatives pricing service.
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Prices an option and returns full Greeks and moneyness diagnostics.
+    pub fn price_derivatives(&self, args: &serde_json::Value) -> Result<serde_json::Value, McpError> {
+        let spot = args
+            .get("spot")
+            .and_then(parse_decimal)
+            .ok_or_else(|| McpError::InvalidArguments("missing or invalid 'spot'".to_string()))?;
+        if spot <= Decimal::ZERO {
+            return Err(McpError::InvalidArguments("spot must be strictly positive".to_string()));
+        }
+
+        let strike = args
+            .get("strike")
+            .and_then(parse_decimal)
+            .ok_or_else(|| McpError::InvalidArguments("missing or invalid 'strike'".to_string()))?;
+        if strike <= Decimal::ZERO {
+            return Err(McpError::InvalidArguments("strike must be strictly positive".to_string()));
+        }
+
+        let t_years = args
+            .get("t_years")
+            .or_else(|| args.get("time_to_expiry"))
+            .and_then(parse_decimal)
+            .ok_or_else(|| McpError::InvalidArguments("missing or invalid 't_years'".to_string()))?;
+        if t_years <= Decimal::ZERO {
+            return Err(McpError::InvalidArguments("t_years must be strictly positive".to_string()));
+        }
+
+        let risk_free_rate = args
+            .get("risk_free_rate")
+            .and_then(parse_decimal)
+            .ok_or_else(|| McpError::InvalidArguments("missing or invalid 'risk_free_rate'".to_string()))?;
+
+        let volatility = args
+            .get("volatility")
+            .and_then(parse_decimal)
+            .ok_or_else(|| McpError::InvalidArguments("missing or invalid 'volatility'".to_string()))?;
+        if volatility <= Decimal::ZERO {
+            return Err(McpError::InvalidArguments("volatility must be strictly positive".to_string()));
+        }
+
+        let dividend_yield = args
+            .get("dividend_yield")
+            .and_then(parse_decimal)
+            .unwrap_or(Decimal::ZERO);
+
+        let option_type_str = args
+            .get("option_type")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| McpError::InvalidArguments("missing 'option_type'".to_string()))?;
+
+        let option_type = match option_type_str.to_lowercase().as_str() {
+            "call" => OptionType::Call,
+            "put" => OptionType::Put,
+            other => {
+                return Err(McpError::InvalidArguments(format!(
+                    "invalid option_type '{other}': expected 'call' or 'put'"
+                )));
+            }
+        };
+
+        let params = PriceParams {
+            spot: Price::new(spot),
+            strike: Price::new(strike),
+            time_to_expiry: t_years,
+            risk_free_rate,
+            dividend_yield,
+            volatility,
+            option_type,
+        };
+
+        let greeks = BlackScholesModel.greeks(&params).map_err(|e| {
+            McpError::InvalidArguments(format!("derivatives pricing error: {e}"))
+        })?;
+
+        let hundred = Decimal::from(100);
+        let trading_days = Decimal::from(252);
+        let theta_daily = greeks.theta / trading_days;
+        let vega_percent = greeks.vega / hundred;
+        let rho_percent = greeks.rho / hundred;
+
+        let (moneyness, intrinsic_value) = match option_type {
+            OptionType::Call => {
+                let diff = spot - strike;
+                let m = if spot == strike {
+                    "ATM"
+                } else if spot > strike {
+                    "ITM"
+                } else {
+                    "OTM"
+                };
+                (m.to_string(), diff.max(Decimal::ZERO))
+            }
+            OptionType::Put => {
+                let diff = strike - spot;
+                let m = if spot == strike {
+                    "ATM"
+                } else if spot < strike {
+                    "ITM"
+                } else {
+                    "OTM"
+                };
+                (m.to_string(), diff.max(Decimal::ZERO))
+            }
+        };
+        let time_value = (greeks.price - intrinsic_value).max(Decimal::ZERO);
+
+        let result = DerivativesPricingResult {
+            option_type: option_type_str.to_string(),
+            spot,
+            strike,
+            t_years,
+            risk_free_rate,
+            dividend_yield,
+            volatility,
+            price: greeks.price,
+            delta: greeks.delta,
+            gamma: greeks.gamma,
+            theta: greeks.theta,
+            theta_daily,
+            vega: greeks.vega,
+            vega_percent,
+            rho: greeks.rho,
+            rho_percent,
+            moneyness: moneyness.clone(),
+            intrinsic_value,
+            time_value,
+        };
+
+        let opt_label = match option_type {
+            OptionType::Call => "Call",
+            OptionType::Put => "Put",
+        };
+        let summary = format!(
+            "Black-Scholes {} (K={}): Fair Price={:.4}, Delta={:.4}, Gamma={:.4}, Vega(1%)={:.4}, Theta(daily)={:.4}",
+            opt_label, strike, greeks.price, greeks.delta, greeks.gamma, vega_percent, theta_daily
+        );
+
+        let metric_items = vec![
+            MetricItem {
+                label: "fair_price".to_string(),
+                value: format!("{:.4}", greeks.price),
+            },
+            MetricItem {
+                label: "delta".to_string(),
+                value: format!("{:.4}", greeks.delta),
+            },
+            MetricItem {
+                label: "gamma".to_string(),
+                value: format!("{:.4}", greeks.gamma),
+            },
+            MetricItem {
+                label: "theta_daily".to_string(),
+                value: format!("{:.4}", theta_daily),
+            },
+            MetricItem {
+                label: "vega_1pct".to_string(),
+                value: format!("{:.4}", vega_percent),
+            },
+            MetricItem {
+                label: "rho_1pct".to_string(),
+                value: format!("{:.4}", rho_percent),
+            },
+        ];
+
+        let envelope = VyapaarResultEnvelope::ok(summary, result)
+            .with_block(DisplayBlock::MetricGrid {
+                items: metric_items,
+            })
+            .with_block(DisplayBlock::Table {
+                title: "Option Valuation Diagnostic".to_string(),
+                columns: vec!["Property".to_string(), "Value".to_string()],
+                rows: vec![
+                    vec!["Moneyness".to_string(), moneyness],
+                    vec!["Intrinsic Value".to_string(), format!("{:.4}", intrinsic_value)],
+                    vec!["Time Value".to_string(), format!("{:.4}", time_value)],
+                    vec!["Annualized Theta".to_string(), format!("{:.4}", greeks.theta)],
+                    vec!["Annualized Vega (100%)".to_string(), format!("{:.4}", greeks.vega)],
+                    vec!["Annualized Rho (100%)".to_string(), format!("{:.4}", greeks.rho)],
+                ],
+            });
+
+        serde_json::to_value(envelope).map_err(McpError::Json)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Volatility Service (GARCH) (Phase 3)
+// ---------------------------------------------------------------------------
+
+/// Volatility Service for GARCH(1,1) parameter estimation and term structure forecasts.
+#[derive(Clone, Debug, Default)]
+pub struct VolatilityToolService;
+
+impl VolatilityToolService {
+    /// Creates a new volatility tool service.
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Fits GARCH(1,1) model and outputs volatility forecasts and diagnostic envelope.
+    pub fn garch_volatility(&self, args: &serde_json::Value) -> Result<serde_json::Value, McpError> {
+        let returns_val = args
+            .get("returns")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| McpError::InvalidArguments("missing returns array".to_string()))?;
+        let returns: Vec<f64> = returns_val.iter().filter_map(|v| v.as_f64()).collect();
+        if returns.is_empty() {
+            return Err(McpError::InvalidArguments("returns array must not be empty".to_string()));
+        }
+
+        let p = args.get("p").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+        let q = args.get("q").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+        let forecast_horizon = args.get("forecast_horizon").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+        let annualization = args.get("annualization").and_then(|v| v.as_f64()).unwrap_or(252.0);
+
+        let config = GarchConfig {
+            p,
+            q,
+            annualization,
+            forecast_horizon,
+        };
+
+        let result = fit_garch11(&returns, &config).map_err(|e| {
+            McpError::InvalidArguments(format!("GARCH fitting error: {e}"))
+        })?;
+
+        let summary = format!(
+            "GARCH(1,1) fitted: persistence={:.4}, latest_vol={:.2}%, unconditional_vol={:.2}%",
+            result.persistence,
+            result.latest_annualized_volatility * 100.0,
+            result.annualized_unconditional_volatility * 100.0,
+        );
+
+        let metric_items = vec![
+            MetricItem {
+                label: "persistence".to_string(),
+                value: format!("{:.4}", result.persistence),
+            },
+            MetricItem {
+                label: "half_life".to_string(),
+                value: result.half_life.map_or("N/A".to_string(), |h| format!("{:.1} bars", h)),
+            },
+            MetricItem {
+                label: "latest_annualized_vol".to_string(),
+                value: format!("{:.2}%", result.latest_annualized_volatility * 100.0),
+            },
+            MetricItem {
+                label: "unconditional_annualized_vol".to_string(),
+                value: format!("{:.2}%", result.annualized_unconditional_volatility * 100.0),
+            },
+            MetricItem {
+                label: "alpha_arch".to_string(),
+                value: format!("{:.4}", result.alpha),
+            },
+            MetricItem {
+                label: "beta_garch".to_string(),
+                value: format!("{:.4}", result.beta),
+            },
+            MetricItem {
+                label: "omega".to_string(),
+                value: format!("{:.6e}", result.omega),
+            },
+            MetricItem {
+                label: "log_likelihood".to_string(),
+                value: format!("{:.2}", result.log_likelihood),
+            },
+        ];
+
+        let forecast_rows: Vec<Vec<String>> = result
+            .forecast_volatilities
+            .iter()
+            .zip(&result.annualized_forecast_volatilities)
+            .enumerate()
+            .map(|(idx, (&step_vol, &ann_vol))| {
+                vec![
+                    format!("T+{}", idx + 1),
+                    format!("{:.4}%", step_vol * 100.0),
+                    format!("{:.2}%", ann_vol * 100.0),
+                ]
+            })
+            .collect();
+
+        let envelope = VyapaarResultEnvelope::ok(summary, result)
+            .with_block(DisplayBlock::MetricGrid {
+                items: metric_items,
+            })
+            .with_block(DisplayBlock::Table {
+                title: "Conditional Volatility Forecasts".to_string(),
+                columns: vec![
+                    "Horizon Step".to_string(),
+                    "Period Volatility".to_string(),
+                    "Annualized Volatility".to_string(),
+                ],
+                rows: forecast_rows,
             });
 
         serde_json::to_value(envelope).map_err(McpError::Json)

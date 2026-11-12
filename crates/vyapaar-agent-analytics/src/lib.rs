@@ -35,6 +35,7 @@ pub mod report;
 pub mod round_trip;
 pub mod trade_stats;
 pub mod validation;
+pub mod volatility;
 pub mod walk_forward;
 
 pub use cointegration::{CointegrationResult, test_engle_granger};
@@ -56,6 +57,7 @@ pub use report::PerformanceReport;
 pub use round_trip::RoundTrip;
 pub use trade_stats::TradeStats;
 pub use validation::ValidationBlock;
+pub use volatility::{GarchConfig, GarchResult, fit_garch11};
 pub use walk_forward::{
     WalkForwardConfig, WalkForwardResult, compute_walk_forward, evaluate_walk_forward,
 };

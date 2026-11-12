@@ -20,9 +20,10 @@ pub use frontier::{
 pub use server::{McpServer, RpcError, RpcMessage};
 pub use tools::{
     AllocationToolService, AnalyticsToolService, AssetWeightResult, BacktestDispatcherService,
-    DecisionExplainorService, ForecastService, IndicatorCatalogService, MetricsCalculatorService,
+    DecisionExplainorService, DerivativesPricingResult, DerivativesToolService, ForecastService,
+    GarchConfig, GarchResult, IndicatorCatalogService, MetricsCalculatorService,
     PortfolioOptimizationResult, SpecValidatorService, StrategyOptimizerService,
-    list_tool_definitions,
+    VolatilityToolService, list_tool_definitions,
 };
 pub use transport::{
     AppState, SseSessionManager, create_router, run_stdio_server, run_stdio_transport,
