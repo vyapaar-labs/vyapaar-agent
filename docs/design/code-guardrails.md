@@ -31,7 +31,7 @@ Enforced by integration test `tests/dependency_rules.rs` inspecting `cargo metad
 ## Verification Commands
 
 ```bash
-cd /home/pmallapp/Devel/Finance/vyapaar-labs/vyapaar-agent
+# Run from the repository root
 grep -rn "#\[cfg(test)\]" crates/*/src/ && exit 1 || true
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings

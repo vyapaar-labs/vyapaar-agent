@@ -1,8 +1,8 @@
 # `vyapaar-agent` — Historical Migration Map (honba-nou → vyapaar-agent)
 
 > **Tier**: Tier 3A (Depends on `vyapaar-core` and `vyapaar-risk`)
-> **Source**: `/home/pmallapp/Devel/Finance/honba-workspace/honba-nou`
-> **Target**: `/home/pmallapp/Devel/Finance/vyapaar-labs/vyapaar-agent`
+> **Source**: `honba-workspace/honba-nou`
+> **Target**: `vyapaar-agent`
 > **Status**: Migration complete & expanded (Phase A conversational assistant implemented).
 
 ## Sub-Crate Mapping Table
@@ -28,7 +28,7 @@
 ## Verification Commands
 
 ```bash
-cd /home/pmallapp/Devel/Finance/vyapaar-labs/vyapaar-agent
+# Run from the repository root
 grep -rn "#\[cfg(test)\]" crates/*/src/ && exit 1 || true
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
