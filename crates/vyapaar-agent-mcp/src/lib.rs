@@ -19,9 +19,10 @@ pub use frontier::{
 };
 pub use server::{McpServer, RpcError, RpcMessage};
 pub use tools::{
-    AnalyticsToolService, BacktestDispatcherService, DecisionExplainorService, ForecastService,
-    IndicatorCatalogService, MetricsCalculatorService, SpecValidatorService,
-    StrategyOptimizerService, list_tool_definitions,
+    AllocationToolService, AnalyticsToolService, AssetWeightResult, BacktestDispatcherService,
+    DecisionExplainorService, ForecastService, IndicatorCatalogService, MetricsCalculatorService,
+    PortfolioOptimizationResult, SpecValidatorService, StrategyOptimizerService,
+    list_tool_definitions,
 };
 pub use transport::{
     AppState, SseSessionManager, create_router, run_stdio_server, run_stdio_transport,

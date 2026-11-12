@@ -8,7 +8,7 @@
 //! - `optimize_strategy`: Triggers genetic or Bayesian parameter sweep in honba-ya.
 //! - `explain_decision`: Returns exact prompt, market context, and risk check for a historical trade decision.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use vyapaar_agent_analytics::{
@@ -17,7 +17,9 @@ use vyapaar_agent_analytics::{
     test_engle_granger,
 };
 
+use chrono::Utc;
 use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -26,7 +28,8 @@ use vyapaar_agent_core::indicators::{
 };
 use vyapaar_agent_core::{DisplayBlock, MetricItem, VyapaarResultEnvelope};
 use vyapaar_agent_forecast::{ForecastConfig, ForecastModel, fit_and_forecast};
-use vyapaar_core::QuantSeries;
+use vyapaar_core::{Exchange, InstrumentId, QuantSeries};
+use vyapaar_ledger_allocation::{AllocationError, AllocationObjective, Constraint, PortfolioState};
 use vyapaar_risk::RiskEngine;
 
 use crate::error::McpError;
@@ -378,6 +381,62 @@ pub fn list_tool_definitions() -> Vec<serde_json::Value> {
                     }
                 },
                 "required": ["factor_returns"]
+            }
+        }),
+        json!({
+            "name": "vyapaar_portfolio_optimize",
+            "category": "allocation",
+            "description": "Optimizes asset weights across an investment universe using Mean-Variance (Markowitz tangency), Risk Parity (Equal Risk Contribution), or HRP objectives",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "expected_returns": {
+                        "type": "array",
+                        "items": { "type": "number" },
+                        "description": "Expected annualized returns per asset (length N, required for mean_variance)"
+                    },
+                    "covariance_matrix": {
+                        "type": "array",
+                        "items": {
+                            "type": "array",
+                            "items": { "type": "number" }
+                        },
+                        "description": "N x N covariance matrix of asset returns"
+                    },
+                    "objective": {
+                        "type": "string",
+                        "enum": ["mean_variance", "risk_parity", "hrp"],
+                        "default": "mean_variance",
+                        "description": "Portfolio optimization objective: mean_variance, risk_parity, or hrp"
+                    },
+                    "target_return": {
+                        "type": "number",
+                        "description": "Optional target portfolio return"
+                    },
+                    "risk_free_rate": {
+                        "type": "number",
+                        "default": 0.0,
+                        "description": "Risk-free rate used for excess return and Sharpe ratio calculation (e.g. 0.065 for 6.5%)"
+                    },
+                    "symbols": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional asset symbols (e.g. ['INFY', 'TCS', 'RELIANCE']). Defaults to ASSET_0, ASSET_1, ..."
+                    },
+                    "weight_bounds": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "instrument": { "type": "string" },
+                                "min": { "type": "number" },
+                                "max": { "type": "number" }
+                            }
+                        },
+                        "description": "Optional per-asset min/max weight bounds [min, max]"
+                    }
+                },
+                "required": ["covariance_matrix"]
             }
         }),
         // --- Two-Tier Gateway Discovery Protocol ---
@@ -1363,6 +1422,427 @@ impl AnalyticsToolService {
         }
 
         serde_json::to_value(envelope).map_err(McpError::Json)
+    }
+}
+
+/// One asset weight result in the allocation output.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssetWeightResult {
+    pub symbol: String,
+    pub weight: Decimal,
+    pub percentage: String,
+}
+
+/// Portfolio optimization output payload (Plan 0007 Track 1 Phase 2).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortfolioOptimizationResult {
+    pub objective: String,
+    pub weights: Vec<AssetWeightResult>,
+    pub weights_map: BTreeMap<String, Decimal>,
+    pub expected_return: Option<Decimal>,
+    pub variance: Decimal,
+    pub volatility: Decimal,
+    pub sharpe_ratio: Option<Decimal>,
+    pub effective_assets: Decimal,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_return: Option<Decimal>,
+}
+
+/// Portfolio allocation and optimization service (Plan 0007 Track 1 Phase 2).
+pub struct AllocationToolService;
+
+impl Default for AllocationToolService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AllocationToolService {
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Solves portfolio allocation using pure Decimal arithmetic via `vyapaar-ledger-allocation`.
+    pub fn optimize(&self, args: &serde_json::Value) -> Result<serde_json::Value, McpError> {
+        let cov_val = args
+            .get("covariance_matrix")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                McpError::InvalidArguments("missing covariance_matrix array".to_string())
+            })?;
+
+        let n = cov_val.len();
+        if n == 0 {
+            return Err(McpError::InvalidArguments(
+                "empty covariance_matrix".to_string(),
+            ));
+        }
+
+        let mut covariance = Vec::with_capacity(n);
+        for (row_idx, row_val) in cov_val.iter().enumerate() {
+            let row_arr = row_val.as_array().ok_or_else(|| {
+                McpError::InvalidArguments(format!(
+                    "covariance_matrix row {row_idx} is not an array"
+                ))
+            })?;
+            if row_arr.len() != n {
+                return Err(McpError::InvalidArguments(format!(
+                    "covariance_matrix is not square: row {row_idx} has length {}, expected {n}",
+                    row_arr.len()
+                )));
+            }
+            let mut row = Vec::with_capacity(n);
+            for (col_idx, item) in row_arr.iter().enumerate() {
+                let dec = parse_decimal(item).ok_or_else(|| {
+                    McpError::InvalidArguments(format!(
+                        "invalid number in covariance_matrix at [{row_idx}][{col_idx}]"
+                    ))
+                })?;
+                row.push(dec);
+            }
+            covariance.push(row);
+        }
+
+        let symbols: Vec<String> =
+            if let Some(syms) = args.get("symbols").and_then(|v| v.as_array()) {
+                if syms.len() != n {
+                    return Err(McpError::InvalidArguments(format!(
+                        "symbols length ({}) does not match covariance matrix dimensions ({n})",
+                        syms.len()
+                    )));
+                }
+                syms.iter()
+                    .enumerate()
+                    .map(|(i, s)| {
+                        s.as_str()
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| format!("ASSET_{i}"))
+                    })
+                    .collect()
+            } else {
+                (0..n).map(|i| format!("ASSET_{i}")).collect()
+            };
+
+        let expected_returns: Option<Vec<Decimal>> = if let Some(ret_arr) =
+            args.get("expected_returns").and_then(|v| v.as_array())
+        {
+            if ret_arr.len() != n {
+                return Err(McpError::InvalidArguments(format!(
+                    "expected_returns length ({}) does not match covariance matrix dimensions ({n})",
+                    ret_arr.len()
+                )));
+            }
+            let mut rets = Vec::with_capacity(n);
+            for (idx, item) in ret_arr.iter().enumerate() {
+                let dec = parse_decimal(item).ok_or_else(|| {
+                    McpError::InvalidArguments(format!(
+                        "invalid number in expected_returns at index {idx}"
+                    ))
+                })?;
+                rets.push(dec);
+            }
+            Some(rets)
+        } else {
+            None
+        };
+
+        let objective_str = args
+            .get("objective")
+            .and_then(|v| v.as_str())
+            .unwrap_or("mean_variance");
+
+        let risk_free_rate = args
+            .get("risk_free_rate")
+            .and_then(parse_decimal)
+            .unwrap_or(Decimal::ZERO);
+
+        let target_return = args.get("target_return").and_then(parse_decimal);
+
+        let objective = match objective_str {
+            "mean_variance" => {
+                if expected_returns.is_none() {
+                    return Err(McpError::InvalidArguments(
+                        "mean_variance objective requires expected_returns array".to_string(),
+                    ));
+                }
+                AllocationObjective::MeanVariance { risk_free_rate }
+            }
+            "risk_parity" => AllocationObjective::RiskParity,
+            "hrp" => AllocationObjective::Hrp,
+            other => {
+                return Err(McpError::InvalidArguments(format!(
+                    "unknown objective '{other}': expected 'mean_variance', 'risk_parity', or 'hrp'"
+                )));
+            }
+        };
+
+        let instruments: Vec<InstrumentId> = symbols
+            .iter()
+            .map(|s| InstrumentId::new(Exchange::Nse, s.clone()))
+            .collect();
+
+        let mut exp_returns_map = BTreeMap::new();
+        if let Some(ref rets) = expected_returns {
+            for (inst, &ret) in instruments.iter().zip(rets) {
+                exp_returns_map.insert(inst.clone(), ret);
+            }
+        }
+
+        let mut cov_map = BTreeMap::new();
+        for (i, inst_row) in instruments.iter().enumerate() {
+            let mut row_map = BTreeMap::new();
+            for (j, inst_col) in instruments.iter().enumerate() {
+                row_map.insert(inst_col.clone(), covariance[i][j]);
+            }
+            cov_map.insert(inst_row.clone(), row_map);
+        }
+
+        let state = PortfolioState {
+            as_of: Utc::now(),
+            instruments: instruments.clone(),
+            current_weights: BTreeMap::new(),
+            expected_returns: exp_returns_map,
+            covariance: cov_map,
+        };
+
+        let mut constraints = Vec::new();
+        if let Some(bounds_arr) = args.get("weight_bounds").and_then(|v| v.as_array()) {
+            for (idx, b) in bounds_arr.iter().enumerate() {
+                let inst = if let Some(sym) = b.get("instrument").and_then(|v| v.as_str()) {
+                    instruments
+                        .iter()
+                        .find(|id| id.symbol.eq_ignore_ascii_case(sym))
+                        .cloned()
+                        .ok_or_else(|| {
+                            McpError::InvalidArguments(format!(
+                                "weight bound references unknown symbol '{sym}'"
+                            ))
+                        })?
+                } else if idx < instruments.len() {
+                    instruments[idx].clone()
+                } else {
+                    continue;
+                };
+
+                let min = b
+                    .get("min")
+                    .and_then(parse_decimal)
+                    .unwrap_or(Decimal::ZERO);
+                let max = b.get("max").and_then(parse_decimal).unwrap_or(Decimal::ONE);
+                constraints.push(Constraint::WeightBounds {
+                    instrument: inst,
+                    min,
+                    max,
+                });
+            }
+        }
+
+        let target =
+            vyapaar_ledger_allocation::optimize(objective, &constraints, &state).map_err(|e| {
+                match e {
+                    AllocationError::InvalidArgument(msg) => McpError::InvalidArguments(msg),
+                    AllocationError::InfeasibleConstraints(msg) => {
+                        McpError::InvalidArguments(format!("infeasible constraints: {msg}"))
+                    }
+                    AllocationError::NotImplemented(msg) => {
+                        McpError::Internal(format!("objective not implemented: {msg}"))
+                    }
+                    AllocationError::SingularCovariance => McpError::Internal(
+                        "covariance matrix is singular or not positive-definite".to_string(),
+                    ),
+                    AllocationError::InsufficientHistory { needed, got } => {
+                        McpError::InvalidArguments(format!(
+                            "insufficient history: needed {needed}, got {got}"
+                        ))
+                    }
+                }
+            })?;
+
+        let mut weights_vec = Vec::with_capacity(n);
+        let mut weights_map = BTreeMap::new();
+        for inst in &instruments {
+            let w = target.weights.get(inst).copied().unwrap_or(Decimal::ZERO);
+            weights_vec.push(w);
+            weights_map.insert(inst.symbol.clone(), w);
+        }
+
+        // Portfolio Expected Return: w^T * mu
+        let exp_ret = expected_returns.as_ref().map(|rets| {
+            weights_vec
+                .iter()
+                .zip(rets)
+                .map(|(w, r)| *w * *r)
+                .sum::<Decimal>()
+        });
+
+        // Portfolio Variance: w^T * Sigma * w
+        let mut portfolio_variance = Decimal::ZERO;
+        for i in 0..n {
+            for j in 0..n {
+                portfolio_variance += weights_vec[i] * weights_vec[j] * covariance[i][j];
+            }
+        }
+
+        // Volatility: sqrt(variance)
+        let portfolio_volatility = decimal_sqrt(portfolio_variance).unwrap_or(Decimal::ZERO);
+
+        // Sharpe Ratio: (return - rf) / vol
+        let sharpe_ratio = if !portfolio_volatility.is_zero() {
+            exp_ret.map(|r| (r - risk_free_rate) / portfolio_volatility)
+        } else {
+            None
+        };
+
+        // Effective number of assets (1 / sum(w^2))
+        let hhi: Decimal = weights_vec.iter().map(|w| *w * *w).sum();
+        let effective_assets = if !hhi.is_zero() {
+            Decimal::ONE / hhi
+        } else {
+            Decimal::ZERO
+        };
+
+        let asset_weight_results: Vec<AssetWeightResult> = instruments
+            .iter()
+            .zip(&weights_vec)
+            .map(|(inst, &w)| AssetWeightResult {
+                symbol: inst.symbol.clone(),
+                weight: w,
+                percentage: format!("{:.2}%", w * Decimal::from(100)),
+            })
+            .collect();
+
+        let result = PortfolioOptimizationResult {
+            objective: objective_str.to_string(),
+            weights: asset_weight_results.clone(),
+            weights_map,
+            expected_return: exp_ret,
+            variance: portfolio_variance,
+            volatility: portfolio_volatility,
+            sharpe_ratio,
+            effective_assets,
+            target_return,
+        };
+
+        let summary = if let (Some(r), Some(s)) = (exp_ret, sharpe_ratio) {
+            format!(
+                "Portfolio optimization ({}): return={:.2}%, vol={:.2}%, Sharpe={:.2}, effective_assets={:.2}",
+                objective_str,
+                r * Decimal::from(100),
+                portfolio_volatility * Decimal::from(100),
+                s,
+                effective_assets
+            )
+        } else {
+            format!(
+                "Portfolio optimization ({}): vol={:.2}%, effective_assets={:.2}",
+                objective_str,
+                portfolio_volatility * Decimal::from(100),
+                effective_assets
+            )
+        };
+
+        let mut metric_items = vec![MetricItem {
+            label: "objective".to_string(),
+            value: objective_str.to_string(),
+        }];
+        if let Some(r) = exp_ret {
+            metric_items.push(MetricItem {
+                label: "expected_return".to_string(),
+                value: format!("{:.2}%", r * Decimal::from(100)),
+            });
+        }
+        metric_items.push(MetricItem {
+            label: "volatility".to_string(),
+            value: format!("{:.2}%", portfolio_volatility * Decimal::from(100)),
+        });
+        metric_items.push(MetricItem {
+            label: "variance".to_string(),
+            value: format!("{:.6}", portfolio_variance),
+        });
+        if let Some(s) = sharpe_ratio {
+            metric_items.push(MetricItem {
+                label: "sharpe_ratio".to_string(),
+                value: format!("{:.2}", s),
+            });
+        }
+        metric_items.push(MetricItem {
+            label: "effective_assets".to_string(),
+            value: format!("{:.2}", effective_assets),
+        });
+        if let Some(tr) = target_return {
+            metric_items.push(MetricItem {
+                label: "target_return".to_string(),
+                value: format!("{:.2}%", tr * Decimal::from(100)),
+            });
+        }
+
+        let table_rows = asset_weight_results
+            .iter()
+            .map(|w| {
+                vec![
+                    w.symbol.clone(),
+                    format!("{:.4}", w.weight),
+                    w.percentage.clone(),
+                ]
+            })
+            .collect();
+
+        let envelope = VyapaarResultEnvelope::ok(summary, result)
+            .with_block(DisplayBlock::MetricGrid {
+                items: metric_items,
+            })
+            .with_block(DisplayBlock::Table {
+                title: "Optimized Asset Allocations".to_string(),
+                columns: vec![
+                    "Symbol".to_string(),
+                    "Weight".to_string(),
+                    "Allocation %".to_string(),
+                ],
+                rows: table_rows,
+            });
+
+        serde_json::to_value(envelope).map_err(McpError::Json)
+    }
+}
+
+fn decimal_sqrt(d: Decimal) -> Option<Decimal> {
+    if d.is_sign_negative() {
+        return None;
+    }
+    if d.is_zero() {
+        return Some(Decimal::ZERO);
+    }
+    let mut x = if d >= Decimal::ONE {
+        d / Decimal::from(2)
+    } else {
+        Decimal::ONE
+    };
+    let half = Decimal::new(5, 1);
+    let tol = Decimal::from_parts(1, 0, 0, false, 12);
+    for _ in 0..50 {
+        if x.is_zero() {
+            return Some(Decimal::ZERO);
+        }
+        let next = half * (x + d / x);
+        if (next - x).abs() <= tol {
+            return Some(next);
+        }
+        x = next;
+    }
+    Some(x)
+}
+
+fn parse_decimal(val: &serde_json::Value) -> Option<Decimal> {
+    if let Some(s) = val.as_str() {
+        s.parse().ok()
+    } else if let Some(i) = val.as_i64() {
+        Some(Decimal::from(i))
+    } else if let Some(u) = val.as_u64() {
+        Some(Decimal::from(u))
+    } else if let Some(f) = val.as_f64() {
+        Decimal::from_f64_retain(f)
+    } else {
+        None
     }
 }
 

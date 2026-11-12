@@ -1015,3 +1015,338 @@ async fn test_gateway_describe_tool_analytics() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Plan 0007 Track 1 Phase 2: Portfolio Optimization & Allocation Tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_tool_portfolio_optimize_mean_variance() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(301),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_portfolio_optimize",
+            "arguments": {
+                "symbols": ["ASSET_A", "ASSET_B"],
+                "expected_returns": [0.10, 0.12],
+                "covariance_matrix": [
+                    [1.0, 0.5],
+                    [0.5, 1.0]
+                ],
+                "objective": "mean_variance",
+                "risk_free_rate": 0.0
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none(), "unexpected error: {:?}", error);
+        let res = result.unwrap();
+        let structured = &res["structuredContent"];
+        assert_eq!(structured["schema"], "vyapaar/result/v1");
+        assert_eq!(structured["status"], "ok");
+        let data = &structured["data"];
+        assert_eq!(data["objective"], "mean_variance");
+
+        let weights = data["weights"].as_array().expect("weights array");
+        assert_eq!(weights.len(), 2);
+
+        let w_a = weights[0]["weight"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap();
+        let w_b = weights[1]["weight"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap();
+        assert!((w_a + w_b - 1.0).abs() < 1e-4);
+        assert!(w_a > 0.0 && w_b > 0.0);
+        // Asset B has higher expected return with identical variance, so w_b > w_a
+        assert!(w_b > w_a);
+
+        let exp_ret = data["expected_return"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap();
+        assert!(exp_ret > 0.10 && exp_ret < 0.12);
+
+        let vol = data["volatility"].as_str().unwrap().parse::<f64>().unwrap();
+        assert!(vol > 0.0);
+
+        let sharpe = data["sharpe_ratio"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap();
+        assert!(sharpe > 0.0);
+
+        let eff = data["effective_assets"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap();
+        assert!((1.0..=2.0).contains(&eff));
+
+        // Check DisplayBlocks
+        let blocks = structured["blocks"].as_array().expect("blocks");
+        assert!(blocks.iter().any(|b| b["type"] == "metric_grid"));
+        assert!(blocks.iter().any(|b| b["type"] == "table"));
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_tool_portfolio_optimize_risk_parity() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(302),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_portfolio_optimize",
+            "arguments": {
+                "symbols": ["LOW_VOL", "HIGH_VOL"],
+                "covariance_matrix": [
+                    [0.04, 0.0],
+                    [0.0, 0.16]
+                ],
+                "objective": "risk_parity"
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none(), "unexpected error: {:?}", error);
+        let res = result.unwrap();
+        let structured = &res["structuredContent"];
+        assert_eq!(structured["status"], "ok");
+        let data = &structured["data"];
+        assert_eq!(data["objective"], "risk_parity");
+
+        let weights = data["weights"].as_array().expect("weights array");
+        assert_eq!(weights.len(), 2);
+
+        let w_low = weights[0]["weight"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap();
+        let w_high = weights[1]["weight"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap();
+        assert!((w_low + w_high - 1.0).abs() < 1e-4);
+        // Inverse volatility on diag(0.04, 0.16) -> vol 0.2 vs 0.4 -> 2/3 vs 1/3
+        assert!((w_low - 2.0 / 3.0).abs() < 0.02);
+        assert!((w_high - 1.0 / 3.0).abs() < 0.02);
+
+        let vol = data["volatility"].as_str().unwrap().parse::<f64>().unwrap();
+        assert!(vol > 0.0);
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_tool_portfolio_optimize_weight_bounds() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(303),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_portfolio_optimize",
+            "arguments": {
+                "symbols": ["ASSET_A", "ASSET_B"],
+                "covariance_matrix": [
+                    [0.04, 0.0],
+                    [0.0, 0.16]
+                ],
+                "objective": "risk_parity",
+                "weight_bounds": [
+                    { "instrument": "ASSET_A", "min": 0.0, "max": 0.50 }
+                ]
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none(), "unexpected error: {:?}", error);
+        let res = result.unwrap();
+        let data = &res["structuredContent"]["data"];
+        let weights = data["weights"].as_array().expect("weights array");
+        let w_a = weights[0]["weight"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap();
+        // Asset A unconstrained would be ~0.667, but clamped to <= 0.50
+        assert!(w_a <= 0.50001);
+        let w_b = weights[1]["weight"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap();
+        assert!((w_a + w_b - 1.0).abs() < 1e-4);
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_tool_portfolio_optimize_hrp_unimplemented() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(304),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_portfolio_optimize",
+            "arguments": {
+                "symbols": ["ASSET_A", "ASSET_B"],
+                "covariance_matrix": [
+                    [0.04, 0.0],
+                    [0.0, 0.16]
+                ],
+                "objective": "hrp"
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { error, .. } = resp {
+        assert!(error.is_some(), "expected error for hrp");
+        let err = error.unwrap();
+        assert!(err.message.contains("not implemented") || err.message.contains("Phase 2"));
+    } else {
+        panic!("expected error response for unimplemented hrp");
+    }
+}
+
+#[tokio::test]
+async fn test_tool_portfolio_optimize_validation_errors() {
+    let server = McpServer::new();
+
+    // 1. Missing covariance matrix
+    let msg1 = RpcMessage::Request {
+        id: json!(305),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_portfolio_optimize",
+            "arguments": {
+                "objective": "mean_variance"
+            }
+        }),
+    };
+    let resp1 = server.handle_message(&msg1).await.expect("response");
+    if let RpcMessage::Response { error, .. } = resp1 {
+        assert!(error.is_some());
+    } else {
+        panic!("expected error");
+    }
+
+    // 2. Missing expected_returns for mean_variance
+    let msg2 = RpcMessage::Request {
+        id: json!(306),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_portfolio_optimize",
+            "arguments": {
+                "covariance_matrix": [[1.0, 0.0], [0.0, 1.0]],
+                "objective": "mean_variance"
+            }
+        }),
+    };
+    let resp2 = server.handle_message(&msg2).await.expect("response");
+    if let RpcMessage::Response { error, .. } = resp2 {
+        assert!(error.is_some());
+    } else {
+        panic!("expected error");
+    }
+
+    // 3. Dimension mismatch between matrix and expected_returns
+    let msg3 = RpcMessage::Request {
+        id: json!(307),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_portfolio_optimize",
+            "arguments": {
+                "expected_returns": [0.10],
+                "covariance_matrix": [[1.0, 0.0], [0.0, 1.0]],
+                "objective": "mean_variance"
+            }
+        }),
+    };
+    let resp3 = server.handle_message(&msg3).await.expect("response");
+    if let RpcMessage::Response { error, .. } = resp3 {
+        assert!(error.is_some());
+    } else {
+        panic!("expected error");
+    }
+}
+
+#[tokio::test]
+async fn test_gateway_search_tools_allocation_category() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(308),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_search_tools",
+            "arguments": {
+                "query": "optimize",
+                "category": "allocation"
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none());
+        let res = result.unwrap();
+        let data = &res["structuredContent"]["data"];
+        assert_eq!(data["category"], "allocation");
+        let tools = data["tools"].as_array().expect("tools array");
+        assert!(
+            tools
+                .iter()
+                .any(|t| t["name"] == "vyapaar_portfolio_optimize")
+        );
+    } else {
+        panic!("unexpected response type");
+    }
+}
+
+#[tokio::test]
+async fn test_gateway_describe_tool_allocation() {
+    let server = McpServer::new();
+    let msg = RpcMessage::Request {
+        id: json!(309),
+        method: "tools/call".to_string(),
+        params: json!({
+            "name": "vyapaar_describe_tool",
+            "arguments": {
+                "tool_name": "vyapaar_portfolio_optimize"
+            }
+        }),
+    };
+
+    let resp = server.handle_message(&msg).await.expect("response");
+    if let RpcMessage::Response { result, error, .. } = resp {
+        assert!(error.is_none());
+        let res = result.unwrap();
+        let data = &res["structuredContent"]["data"];
+        assert_eq!(data["tool_name"], "vyapaar_portfolio_optimize");
+        assert_eq!(data["schema"]["category"], "allocation");
+        assert!(data["schema"]["inputSchema"].is_object());
+    } else {
+        panic!("unexpected response type");
+    }
+}

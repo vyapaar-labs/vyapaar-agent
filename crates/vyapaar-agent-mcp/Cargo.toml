@@ -18,6 +18,7 @@ axum.workspace = true
 tracing.workspace = true
 vyapaar-core.workspace = true
 vyapaar-risk.workspace = true
+vyapaar-ledger-allocation.workspace = true
 vyapaar-agent-core = { path = "../vyapaar-agent-core" }
 vyapaar-agent-analytics = { path = "../vyapaar-agent-analytics" }
 vyapaar-agent-llm = { path = "../vyapaar-agent-llm" }

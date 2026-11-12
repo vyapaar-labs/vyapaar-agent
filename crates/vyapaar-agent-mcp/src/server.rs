@@ -5,9 +5,9 @@ use serde_json::json;
 
 use crate::error::McpError;
 use crate::tools::{
-    AnalyticsToolService, BacktestDispatcherService, DecisionExplainorService, ForecastService,
-    IndicatorCatalogService, MetricsCalculatorService, SpecValidatorService,
-    StrategyOptimizerService, list_tool_definitions,
+    AllocationToolService, AnalyticsToolService, BacktestDispatcherService,
+    DecisionExplainorService, ForecastService, IndicatorCatalogService, MetricsCalculatorService,
+    SpecValidatorService, StrategyOptimizerService, list_tool_definitions,
 };
 use vyapaar_agent_core::{DataReferenceStore, DisplayBlock, MetricItem, VyapaarResultEnvelope};
 
@@ -96,6 +96,7 @@ pub struct McpServer {
     pub decision_explainor: DecisionExplainorService,
     pub forecast: ForecastService,
     pub analytics: AnalyticsToolService,
+    pub allocation: AllocationToolService,
     /// Ephemeral data reference store (`$vyapaar/ref/<uuid>`) for chaining
     /// large time-series between tools without token roundtrips.
     pub data_store: DataReferenceStore,
@@ -119,6 +120,7 @@ impl McpServer {
             decision_explainor: DecisionExplainorService::new(),
             forecast: ForecastService::new(),
             analytics: AnalyticsToolService::new(),
+            allocation: AllocationToolService::new(),
             data_store: DataReferenceStore::new(),
         }
     }
@@ -280,6 +282,7 @@ impl McpServer {
             "vyapaar_cointegration" => return self.analytics.cointegration(&arguments),
             "vyapaar_walk_forward" => return self.analytics.walk_forward(&arguments),
             "vyapaar_factor_attribution" => return self.analytics.factor_attribution(&arguments),
+            "vyapaar_portfolio_optimize" => return self.allocation.optimize(&arguments),
             "vyapaar_search_tools" => {
                 let envelope = self.search_tools(&arguments)?;
                 return serde_json::to_value(envelope).map_err(McpError::Json);
